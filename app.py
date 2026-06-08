@@ -119,7 +119,7 @@ def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
     df['volume'] = pd.to_numeric(df['volume'])
     
-    # Lean indicator profile calculation
+    # Lean indicator configuration
     df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
     df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
     df['RSI'] = ta.rsi(df['close'], length=14)
@@ -134,8 +134,8 @@ def get_current_cross_state(df):
 
 def get_last_crossover_details(df):
     """
-    Looks back through historical records to extract structural trend flips.
-    Returns: (Crossover Price, Crossover Type, Distance in Bars/Days)
+    Looks back through historical records to extract the exact point of index intersection.
+    Returns: (Crossover Value, Crossover Type, Distance in Bars/Days)
     """
     if len(df) < 2: return 0.0, "No Cross", 0
     df = df.copy().dropna(subset=['VWMA_9', 'VWMA_26']).reset_index(drop=True)
@@ -148,7 +148,10 @@ def get_last_crossover_details(df):
         last_cross_row = crosses.iloc[-1]
         bars_ago = len(df) - 1 - crosses.index[-1]
         c_type = "🔥 Bullish" if last_cross_row['VWMA_9'] > last_cross_row['VWMA_26'] else "❄️ Bearish"
-        return round(last_cross_row['close'], 2), c_type, int(bars_ago)
+        
+        # TARGET CHANGE: Extract indicator crossing price value itself instead of the candle close
+        cross_value = round(last_cross_row['VWMA_9'], 2)
+        return cross_value, c_type, int(bars_ago)
     return 0.0, "No Cross", 0
 
 # --- DATA STREAM COMPILER ---
@@ -160,7 +163,7 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
         token = token_lookup.get(symbol)
         if not token: return None
         try:
-            # Dual historical record pull
+            # Dual historical sequence fetch
             hist_1d = kite.historical_data(token, from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="day")
             hist_15m = kite.historical_data(token, from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="15minute")
             
@@ -173,13 +176,13 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             latest_1d = df_1d.iloc[-1]
             ltp = round(float(latest_15m['close']), 2)
             
-            # Extract distinct multi-timeframe anchors
-            cross_px_15m, cross_type_15m, bars_ago_15m = get_last_crossover_details(df_15m)
-            cross_px_1d, cross_type_1d, days_ago_1d = get_last_crossover_details(df_1d)
+            # Extract precise timeframe cross intersection price barriers
+            cross_val_15m, cross_type_15m, bars_ago_15m = get_last_crossover_details(df_15m)
+            cross_val_1d, cross_type_1d, days_ago_1d = get_last_crossover_details(df_1d)
             
-            # Check 1% structural buffer borders
-            within_15m = "🎯 YES" if (cross_px_15m * 0.99) <= ltp <= (cross_px_15m * 1.01) else "No"
-            within_1d = "🎯 YES" if (cross_px_1d * 0.99) <= ltp <= (cross_px_1d * 1.01) else "No"
+            # Formulate the 1% buffer borders relative to indicator value crossing
+            within_15m = "🎯 YES" if (cross_val_15m * 0.99) <= ltp <= (cross_val_15m * 1.01) else "No"
+            within_1d = "🎯 YES" if (cross_val_1d * 0.99) <= ltp <= (cross_val_1d * 1.01) else "No"
             
             return {
                 "Stock Name": symbol,
@@ -194,14 +197,14 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 # Tactical 15-Minute Metrics
                 "RSI (15M)": round(latest_15m['RSI'], 2),
                 "VWMA Cross (15M)": get_current_cross_state(df_15m),
-                "Last Cross Value (15M)": cross_px_15m,
+                "Last Cross Value (15M)": cross_val_15m,
                 "Last Cross Type (15M)": f"{cross_type_15m} ({bars_ago_15m} bars ago)",
                 "Within 1% of Cross (15M)": within_15m,
                 
                 # Strategic Daily Metrics
                 "RSI (1D)": round(latest_1d['RSI'], 2),
                 "VWMA Cross (1D)": get_current_cross_state(df_1d),
-                "Last Cross Value (1D)": cross_px_1d,
+                "Last Cross Value (1D)": cross_val_1d,
                 "Last Cross Type (1D)": f"{cross_type_1d} ({days_ago_1d} days ago)",
                 "Within 1% of Cross (1D)": within_1d
             }
@@ -255,7 +258,6 @@ def run_integrated_pipeline():
         st.subheader("⚙️ Timeframe Filter Configurator")
         active_tf = st.radio("Select Active Scanner Frame Layer:", ["15 Minute", "1 Day"], horizontal=True)
         
-        # Display tracking analytics metrics layout
         suffix = " (15M)" if active_tf == "15 Minute" else " (1D)"
         near_cross_col = f"Within 1% of Cross{suffix}"
         near_cross_df = master_df[master_df[near_cross_col] == "🎯 YES"]
@@ -307,4 +309,4 @@ def run_integrated_pipeline():
 
 if __name__ == "__main__":
     run_integrated_pipeline()
-    
+                
