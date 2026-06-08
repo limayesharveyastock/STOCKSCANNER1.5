@@ -3,6 +3,7 @@ import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timedelta
 import time
+from kiteconnect import KiteConnect
 
 st.set_page_config(layout="wide")
 st.title("🚀 NIFTY 50 Technical Scanner")
@@ -16,13 +17,24 @@ def get_kite():
     kite.set_access_token(access_token)
     return kite
 
+# Dynamically fetch and map all active NSE instrument tokens to prevent truncation
+@st.cache_data(ttl=86400) # Caches the instrument master map for 24 hours
+def get_instrument_lookup():
+    kite = get_kite()
+    try:
+        instruments = kite.instruments("NSE")
+        return {inst['tradingsymbol']: str(inst['instrument_token']) for inst in instruments}
+    except Exception as e:
+        st.error(f"Error fetching instrument master from Kite: {e}")
+        return {}
+
 def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
     df['high'] = pd.to_numeric(df['high'])
     df['low'] = pd.to_numeric(df['low'])
     df['volume'] = pd.to_numeric(df['volume'])
     
-    # Technical Indicators (Retaining VWMA 9/26 for reference matrix)
+    # Technical Indicators
     df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
     df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
     df['RSI'] = ta.rsi(df['close'], length=14)
@@ -35,50 +47,36 @@ def calculate_indicators(df):
 @st.fragment(run_every="300s") # Refreshes every 5 minutes
 def run_nifty_50_scanner():
     kite = get_kite()
+    token_lookup = get_instrument_lookup()
     
-    # NIFTY 50 Trading Symbols and Instrument Tokens
-    nifty_50_stocks = {
-        "RELIANCE": "738561",
-        "TCS": "2953217",
-        "INFY": "408065",
-        "HDFCBANK": "341249",
-        "ICICIBANK": "1270529",
-        "SBIN": "779521",
-        "BHARTIARTL": "2714625",
-        "ITC": "424961",
-        "LT": "2939649",
-        "AXISBANK": "1510401",
-        "KOTAKBANK": "492033",
-        "HINDUNILVR": "340481",
-        "BAJFINANCE": "81153",
-        "MARUTI": "2800641",
-        "M&M": "525825",
-        "TATASTEEL": "895745",
-        "HCLTECH": "1839361",
-        "SUNPHARMA": "857857",
-        "NTPC": "2977281",
-        "POWERGRID": "3834113",
-        "TITAN": "897537",
-        "ULTRACEMCO": "2952193",
-        "ASIANPAINT": "60417",
-        "COALINDIA": "5215745",
-        "INDUSINDBK": "1346049",
-        "BAJAJFINSV": "4265217",
-        "ADANIENT": "1118465",
-        "ADANIPORTS": "3861249",
-        "JIOFIN": "615553",
-        "TATA CONSUMER": "878593"
-    }
+    # Complete NIFTY 50 Ticker Stream
+    nifty_50_symbols = [
+        "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", 
+        "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BHARTIARTL", 
+        "BPCL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", 
+        "EICHERMOT", "ETERNAL", "GRASIM", "HCLTECH", "HDFCBANK", 
+        "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", 
+        "INDUSINDBK", "INFY", "ITC", "JSWSTEEL", "KOTAKBANK", 
+        "LT", "LTIM", "M&M", "MARUTI", "MAXHEALTH", "NESTLEIND", 
+        "NTPC", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", 
+        "SBIN", "SUNPHARMA", "TATACONSUM", "TATAMOTORS", "TATASTEEL", 
+        "TCS", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO", "JIOFIN"
+    ]
     
     scan_results = []
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    total_stocks = len(nifty_50_stocks)
+    total_stocks = len(nifty_50_symbols)
     
-    for index, (name, token) in enumerate(nifty_50_stocks.items()):
-        status_text.text(f"Scanning {index + 1}/{total_stocks}: {name}...")
+    for index, symbol in enumerate(nifty_50_symbols):
+        status_text.text(f"Scanning {index + 1}/{total_stocks}: {symbol}...")
         progress_bar.progress((index + 1) / total_stocks)
+        
+        # Resolve instrument token safely from master list
+        token = token_lookup.get(symbol)
+        if not token:
+            continue # Skip if ticker symbol isn't matching the NSE master map
         
         try:
             hist = kite.historical_data(
@@ -88,15 +86,18 @@ def run_nifty_50_scanner():
                 interval="15minute"
             )
             
-            if not hist:
+            if not hist or len(hist) < 15:
                 continue
                 
             df = pd.DataFrame(hist)
             df = calculate_indicators(df)
             latest = df.iloc[-1]
             
-            # Trend Logic: Conditioned strictly on your new RSI boundaries
+            # Condition Boundaries
             rsi_val = latest['RSI']
+            if pd.isna(rsi_val):
+                continue
+                
             if rsi_val > 70:
                 trend = "🟢 BULLISH"
             elif rsi_val < 30:
@@ -107,7 +108,7 @@ def run_nifty_50_scanner():
             supertrend_val = latest.filter(like='SUPERT_').iloc[0]
             
             scan_results.append({
-                "Stock Name": name,
+                "Stock Name": symbol,
                 "LTP": round(latest['close'], 2),
                 "VWMA 9": round(latest['VWMA_9'], 2),
                 "VWMA 26": round(latest['VWMA_26'], 2),
@@ -116,10 +117,11 @@ def run_nifty_50_scanner():
                 "Trend Status": trend
             })
             
-            time.sleep(0.35)
+            # Reduced sleep interval to prevent multi-minute execution lag across 50 tokens
+            time.sleep(0.15)
             
         except Exception as e:
-            time.sleep(0.35)
+            time.sleep(0.15)
             continue
 
     progress_bar.empty()
@@ -128,12 +130,11 @@ def run_nifty_50_scanner():
     if scan_results:
         results_df = pd.DataFrame(scan_results)
         
-        # Segment data based on Trend Status
         bullish_df = results_df[results_df["Trend Status"] == "🟢 BULLISH"]
         bearish_df = results_df[results_df["Trend Status"] == "🔴 BEARISH"]
         neutral_df = results_df[results_df["Trend Status"] == "⚪ NEUTRAL"]
         
-        # Dashboard Overview Summary Cards
+        # Summary Matrix
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Scanned", len(results_df))
         c2.metric("RSI > 70 (Bullish)", len(bullish_df))
@@ -142,45 +143,26 @@ def run_nifty_50_scanner():
         
         st.divider()
         
-        # Section 1: Bullish Momentum
+        # Data View Segments
         st.subheader("🔥 Bullish Trend (RSI Above 70)")
         if not bullish_df.empty:
-            st.dataframe(
-                bullish_df.drop(columns=["Trend Status"]), 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={"LTP": st.column_config.NumberColumn("Price (₹)", format="%.2f")}
-            )
+            st.dataframe(bullish_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
         else:
-            st.info("No stocks currently showing overbought/bullish RSI conditions.")
+            st.info("No stocks currently overbought.")
             
         st.divider()
         
-        # Section 2: Bearish Momentum
         st.subheader("❄️ Bearish Trend (RSI Below 30)")
         if not bearish_df.empty:
-            st.dataframe(
-                bearish_df.drop(columns=["Trend Status"]), 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={"LTP": st.column_config.NumberColumn("Price (₹)", format="%.2f")}
-            )
+            st.dataframe(bearish_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
         else:
-            st.info("No stocks currently showing oversold/bearish RSI conditions.")
+            st.info("No stocks currently oversold.")
             
         st.divider()
         
-        # Section 3: Consolidation / Neutral Zone
-        st.subheader("⚖️ Neutral Market Trend (RSI Between 30 and 70)")
+        st.subheader("⚖️ Neutral Market Trend (RSI 30-70)")
         if not neutral_df.empty:
-            st.dataframe(
-                neutral_df.drop(columns=["Trend Status"]), 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={"LTP": st.column_config.NumberColumn("Price (₹)", format="%.2f")}
-            )
-        else:
-            st.info("No stocks found within standard range.")
+            st.dataframe(neutral_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
             
     else:
         st.warning("No data retrieved during scan.")
