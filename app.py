@@ -44,7 +44,7 @@ def calculate_indicators(df):
     df = pd.concat([df, st_data], axis=1)
     return df
 
-@st.fragment(run_every="300s") # Refreshes every 5 minutes
+@st.fragment(run_every="900s") # Changed to 900s to auto-refresh every 15 minutes
 def run_nifty_50_scanner():
     kite = get_kite()
     token_lookup = get_instrument_lookup()
@@ -73,10 +73,9 @@ def run_nifty_50_scanner():
         status_text.text(f"Scanning {index + 1}/{total_stocks}: {symbol}...")
         progress_bar.progress((index + 1) / total_stocks)
         
-        # Resolve instrument token safely from master list
         token = token_lookup.get(symbol)
         if not token:
-            continue # Skip if ticker symbol isn't matching the NSE master map
+            continue
         
         try:
             hist = kite.historical_data(
@@ -93,7 +92,6 @@ def run_nifty_50_scanner():
             df = calculate_indicators(df)
             latest = df.iloc[-1]
             
-            # Condition Boundaries
             rsi_val = latest['RSI']
             if pd.isna(rsi_val):
                 continue
@@ -117,7 +115,6 @@ def run_nifty_50_scanner():
                 "Trend Status": trend
             })
             
-            # Reduced sleep interval to prevent multi-minute execution lag across 50 tokens
             time.sleep(0.15)
             
         except Exception as e:
