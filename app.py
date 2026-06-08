@@ -34,7 +34,6 @@ def get_instrument_lookup():
 def load_metadata():
     csv_path = "stock_metadata.csv"
     
-    # Accurate Nifty 50 Core Constituents and Industry Classifications
     nifty50_universe = {
         "ADANIENT": {"Industry": "Metals & Mining", "Promoter": 72.6, "PE": 45.2, "Ind_PE": 24.1, "PB": 4.2, "ROCE": 12.5},
         "ADANIPORTS": {"Industry": "Infrastructure / Services", "Promoter": 65.3, "PE": 33.1, "Ind_PE": 28.5, "PB": 3.9, "ROCE": 14.8},
@@ -107,25 +106,14 @@ def load_metadata():
                 }
                 df = df.rename(columns=rename_map)
                 df = df[df["Ticker"].isin(nifty50_universe.keys())]
-                
-                st.success(f"✅ Connected to stock_metadata.csv ({len(df)} Nifty 50 matches mapped)")
                 return df
         except Exception as e:
             st.error(f"⚠️ CSV parsing error: {e}")
 
-    st.warning("⚠️ Using Nifty 50 in-memory baseline. (CSV not found/empty).")
     fallback_data = [{
-        "Ticker": ticker,
-        "Industry": data["Industry"],
-        "Promoter_Percent": data["Promoter"],
-        "Stock_PE": data["PE"],
-        "Industry_PE": data["Ind_PE"],
-        "PB": data["PB"],
-        "ROCE": data["ROCE"],
-        "52W_High": 2000.0,
-        "52W_Low": 1000.0,
-        "5Y_High": 3000.0,
-        "5Y_Low": 500.0
+        "Ticker": ticker, "Industry": data["Industry"], "Promoter_Percent": data["Promoter"],
+        "Stock_PE": data["PE"], "Industry_PE": data["Ind_PE"], "PB": data["PB"], "ROCE": data["ROCE"],
+        "52W_High": 2000.0, "52W_Low": 1000.0, "5Y_High": 3000.0, "5Y_Low": 500.0
     } for ticker, data in nifty50_universe.items()]
     return pd.DataFrame(fallback_data)
 
@@ -142,13 +130,38 @@ def calculate_indicators(df):
     df['VWMA_100'] = ta.vwma(df['close'], df['volume'], length=100)
     df['RSI'] = ta.rsi(df['close'], length=14)
     
-    # Dynamic Volume Moving Average Filter lengths
+    # Volume Moving Averages
     df['VOL_MA_20'] = ta.sma(df['volume'], length=20)
     df['VOL_MA_50'] = ta.sma(df['volume'], length=50)
     
     st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
     df = pd.concat([df, st_data], axis=1)
     return df
+
+def get_crossover_signal(df):
+    """
+    Evaluates dynamic shifting to catch exact cross moments on current or previous bars.
+    """
+    if len(df) < 3:
+        return "No Cross"
+        
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+    prev_2 = df.iloc[-3]
+    
+    # 1. Fresh Cross on current candle
+    if prev['VWMA_9'] <= prev['VWMA_26'] and latest['VWMA_9'] > latest['VWMA_26']:
+        return "🔥 9 CROSSES 26 FROM BELOW"
+    elif prev['VWMA_9'] >= prev['VWMA_26'] and latest['VWMA_9'] < latest['VWMA_26']:
+        return "❄️ 9 CROSSES 26 FROM ABOVE"
+        
+    # 2. Cross occurred exactly 1 candle ago (helps track immediate post-breakouts)
+    if prev_2['VWMA_9'] <= prev_2['VWMA_26'] and prev['VWMA_9'] > prev['VWMA_26']:
+        return "🔥 9 CROSSES 26 FROM BELOW (1 Bar Ago)"
+    elif prev_2['VWMA_9'] >= prev_2['VWMA_26'] and prev['VWMA_9'] < prev['VWMA_26']:
+        return "❄️ 9 CROSSES 26 FROM ABOVE (1 Bar Ago)"
+        
+    return "No Cross"
 
 @st.cache_data(ttl=14400)
 def get_daily_macro_data(_kite, token, symbol):
@@ -168,20 +181,23 @@ def get_daily_macro_data(_kite, token, symbol):
         
         st_col = latest_1d.filter(like='SUPERT_').index[0]
         
-        # Calculate daily crossover status
-        if prev_1d['VWMA_9'] <= prev_1d['VWMA_26'] and latest_1d['VWMA_9'] > latest_1d['VWMA_26']:
-            vwma_cross_1d = "🔥 BULLISH CROSS"
-        elif prev_1d['VWMA_9'] >= prev_1d['VWMA_26'] and latest_1d['VWMA_9'] < latest_1d['VWMA_26']:
-            vwma_cross_1d = "❄️ BEARISH CROSS"
-        else:
-            vwma_cross_1d = "🟢 Above" if latest_1d['VWMA_9'] > latest_1d['VWMA_26'] else "🔴 Below"
-
-        # Lookback engine to find the exact price where the trend last flipped
+        # Exact directional change calculator
+        vwma_cross_signal_1d = get_crossover_signal(df_1d)
+        
+        # Historical absolute anchor points
         above_1d = df_1d['VWMA_9'] > df_1d['VWMA_26']
         cross_mask_1d = above_1d != above_1d.shift()
         cross_mask_1d.iloc[0] = False
         cross_df_1d = df_1d[cross_mask_1d]
         last_cross_price_1d = float(cross_df_1d['close'].iloc[-1]) if not cross_df_1d.empty else float(latest_1d['close'])
+
+        curr_price = float(latest_1d['close'])
+        if float(latest_1d['volume']) > float(latest_1d['VOL_MA_50']) and float(latest_1d['RSI']) > 60 and curr_price > last_cross_price_1d:
+            trend_1d = "🟢 BULLISH"
+        elif float(latest_1d['volume']) > float(latest_1d['VOL_MA_50']) and float(latest_1d['RSI']) < 40 and curr_price < last_cross_price_1d:
+            trend_1d = "🔴 BEARISH"
+        else:
+            trend_1d = "⚪ NEUTRAL"
 
         return {
             "RSI_1D": float(latest_1d['RSI']),
@@ -190,8 +206,9 @@ def get_daily_macro_data(_kite, token, symbol):
             "SUPERTREND_1D": float(latest_1d[st_col]),
             "VWMA_50_1D": float(latest_1d['VWMA_50']),
             "VWMA_100_1D": float(latest_1d['VWMA_100']),
-            "VWMA_CROSS_1D": vwma_cross_1d,
-            "VWMA_CROSS_PRICE_1D": last_cross_price_1d
+            "VWMA_CROSS_SIGNAL_1D": vwma_cross_signal_1d,
+            "VWMA_CROSS_PRICE_1D": last_cross_price_1d,
+            "TREND_STATUS_1D": trend_1d
         }
     except Exception:
         return None
@@ -221,38 +238,32 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             df_15m = pd.DataFrame(hist_15m)
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
-            prev_15m = df_15m.iloc[-2]
             
             time.sleep(0.5) 
             
             rsi_15m = latest_15m['RSI']
             vol_ma_15m = latest_15m['VOL_MA_20']  
             curr_vol_15m = latest_15m['volume']
+            curr_price_15m = latest_15m['close']
             
-            if curr_vol_15m > vol_ma_15m and rsi_15m > 60: trend_15m = "🟢 BULLISH"
-            elif curr_vol_15m > vol_ma_15m and rsi_15m < 40: trend_15m = "🔴 BEARISH"
-            else: trend_15m = "⚪ NEUTRAL"
-            
-            if daily_data["VOLUME_1D"] > daily_data["VOL_MA_1D"] and daily_data["RSI_1D"] > 60: trend_1d = "🟢 BULLISH"
-            elif daily_data["VOLUME_1D"] > daily_data["VOL_MA_1D"] and daily_data["RSI_1D"] < 40: trend_1d = "🔴 BEARISH"
-            else: trend_1d = "⚪ NEUTRAL"
-                
-            st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
-            
-            # Formulate the 15-Minute exact crossover engine state
-            if prev_15m['VWMA_9'] <= prev_15m['VWMA_26'] and latest_15m['VWMA_9'] > latest_15m['VWMA_26']:
-                vwma_cross_15m = "🔥 BULLISH CROSS"
-            elif prev_15m['VWMA_9'] >= prev_15m['VWMA_26'] and latest_15m['VWMA_9'] < latest_15m['VWMA_26']:
-                vwma_cross_15m = "❄️ BEARISH CROSS"
-            else:
-                vwma_cross_15m = "🟢 Above" if latest_15m['VWMA_9'] > latest_15m['VWMA_26'] else "🔴 Below"
+            # Formulate the 15-Minute explicit structural directional trigger
+            vwma_cross_signal_15m = get_crossover_signal(df_15m)
 
-            # 15M lookback to fetch price where the cross triggered
+            # Historical baseline lookback calculation
             above_15m = df_15m['VWMA_9'] > df_15m['VWMA_26']
             cross_mask_15m = above_15m != above_15m.shift()
             cross_mask_15m.iloc[0] = False
             cross_df_15m = df_15m[cross_mask_15m]
             last_cross_price_15m = float(cross_df_15m['close'].iloc[-1]) if not cross_df_15m.empty else float(latest_15m['close'])
+
+            if curr_vol_15m > vol_ma_15m and rsi_15m > 60 and curr_price_15m > last_cross_price_15m: 
+                trend_15m = "🟢 BULLISH"
+            elif curr_vol_15m > vol_ma_15m and rsi_15m < 40 and curr_price_15m < last_cross_price_15m: 
+                trend_15m = "🔴 BEARISH"
+            else: 
+                trend_15m = "⚪ NEUTRAL"
+                
+            st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
 
             return {
                 "Stock Name": symbol,
@@ -262,31 +273,23 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 "Industry PE": row.get("Industry_PE", 0.0),
                 "PB": row.get("PB", 0.0),
                 "ROCE": row.get("ROCE", 0.0),
-                "52W High": row.get("52W_High", 0.0),
-                "52W Low": row.get("52W_Low", 0.0),
-                "5Y High": row.get("5Y_High", 0.0),
-                "5Y Low": row.get("5Y_Low", 0.0),
-                "LTP": round(latest_15m['close'], 2),
+                "LTP": round(curr_price_15m, 2),
                 
+                "VWMA Cross Indicator (15M)": vwma_cross_signal_15m,
+                "VWMA Cross Price (15M)": round(last_cross_price_15m, 2),
+                "Trend Status (15M)": trend_15m,
                 "RSI (15M)": round(rsi_15m, 2),
                 "Vol MA (15M)": round(vol_ma_15m, 1),
                 "Supertrend (15M)": round(st_15m, 2),
-                "Trend Status (15M)": trend_15m,
-                "VWMA Cross (15M)": vwma_cross_15m,
-                "VWMA Cross Price (15M)": round(last_cross_price_15m, 2),
                 "VWMA 9 (15M)": round(latest_15m['VWMA_9'], 2),
                 "VWMA 26 (15M)": round(latest_15m['VWMA_26'], 2),
-                "VWMA 50 (15M)": round(latest_15m['VWMA_50'], 2),
-                "VWMA 100 (15M)": round(latest_15m['VWMA_100'], 2),
                 
+                "VWMA Cross Indicator (1D)": daily_data["VWMA_CROSS_SIGNAL_1D"],
+                "VWMA Cross Price (1D)": round(daily_data["VWMA_CROSS_PRICE_1D"], 2),
+                "Trend Status (1D)": daily_data["TREND_STATUS_1D"],
                 "RSI (1D)": round(daily_data["RSI_1D"], 2),
                 "Vol MA (1D)": round(daily_data["VOL_MA_1D"], 1),
-                "Supertrend (1D)": round(daily_data["SUPERTREND_1D"], 2),
-                "Trend Status (1D)": trend_1d,
-                "VWMA Cross (1D)": daily_data["VWMA_CROSS_1D"],
-                "VWMA Cross Price (1D)": round(daily_data["VWMA_CROSS_PRICE_1D"], 2),
-                "VWMA 50 (1D)": round(daily_data["VWMA_50_1D"], 2),
-                "VWMA 100 (1D)": round(daily_data["VWMA_100_1D"], 2),
+                "Supertrend (1D)": round(daily_data["SUPERTREND_1D"], 2)
             }
         except Exception:
             return None
@@ -330,8 +333,6 @@ def run_integrated_pipeline():
         if st.session_state.last_run:
             last_time_str = datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')
             st.write(f"⏱️ Matrix sync verified at: **{last_time_str}**")
-        else:
-            st.write("⏳ Scanner ready to process Nifty 50 tracking.")
             
     if should_scan:
         with st.spinner("🚀 Scanning Nifty 50 assets concurrently..."):
@@ -340,9 +341,6 @@ def run_integrated_pipeline():
                 st.session_state.master_df = pd.DataFrame(results)
                 st.session_state.last_run = current_time
                 st.rerun()
-            else:
-                st.error("No active market telemetry retrieved.")
-                return
 
     if st.session_state.master_df is None:
         return
@@ -351,7 +349,6 @@ def run_integrated_pipeline():
     
     tab1, tab2 = st.tabs(["📊 Technical Multi-Timeframe Scanner", "🏢 Structural Bifurcation View"])
     
-    # --- TAB 1: TECHNICAL VIEWS ---
     with tab1:
         st.subheader("⚙️ Timeframe Filter Configurator")
         active_tf = st.radio("Select Active Scanner Frame Layer:", ["15 Minute", "1 Day"], horizontal=True)
@@ -372,12 +369,12 @@ def run_integrated_pipeline():
         
         if active_tf == "15 Minute":
             tech_display_cols = [
-                "Stock Name", "LTP", "VWMA Cross (15M)", "VWMA Cross Price (15M)", "VWMA 9 (15M)", "VWMA 26 (15M)", "VWMA 50 (15M)", "VWMA 100 (15M)", 
-                "RSI (15M)", "Vol MA (15M)", "Supertrend (15M)"
+                "Stock Name", "LTP", "VWMA Cross Indicator (15M)", "VWMA Cross Price (15M)", 
+                "RSI (15M)", "Vol MA (15M)", "Supertrend (15M)", "VWMA 9 (15M)", "VWMA 26 (15M)"
             ]
         else:
             tech_display_cols = [
-                "Stock Name", "LTP", "VWMA Cross (1D)", "VWMA Cross Price (1D)", "VWMA 50 (1D)", "VWMA 100 (1D)", 
+                "Stock Name", "LTP", "VWMA Cross Indicator (1D)", "VWMA Cross Price (1D)", 
                 "RSI (1D)", "Vol MA (1D)", "Supertrend (1D)"
             ]
         
@@ -385,21 +382,24 @@ def run_integrated_pipeline():
         if not bullish_df.empty:
             st.dataframe(bullish_df[tech_display_cols], use_container_width=True, hide_index=True)
         else:
-            st.info("No breakouts verified for Nifty 50 assets right now.")
+            st.info("No bullish breakouts verified for Nifty 50 assets right now.")
+
+        st.subheader(f"❄️ Momentum Breakdown Short Signals ({active_tf})")
+        if not bearish_df.empty:
+            st.dataframe(bearish_df[tech_display_cols], use_container_width=True, hide_index=True)
+        else:
+            st.info("No short breakdown triggers detected across the index.")
             
         st.subheader(f"⚖️ Neutral / Structural Rotation Grid ({active_tf})")
         if not neutral_df.empty:
             st.dataframe(neutral_df[tech_display_cols], use_container_width=True, hide_index=True)
 
-    # --- TAB 2: STRUCTURAL PROFILE VIEWS ---
     with tab2:
         st.subheader("🔍 Valuation & Ownership Filter Matrix")
         f_col1, f_col2 = st.columns(2)
-        
         with f_col1:
             all_industries = ["All Industries"] + sorted(list(master_df["Industry"].unique()))
             selected_industry = st.selectbox("Sector Classification:", all_industries)
-            
         with f_col2:
             master_df["Promoter Tier"] = master_df["Promoter Holding (%)"].apply(
                 lambda x: "High (>50%)" if x >= 50.0 else ("Medium (30%-50%)" if x >= 30.0 else "Low/Institutional (<30%)")
@@ -413,20 +413,9 @@ def run_integrated_pipeline():
         if selected_tier != "All Tiers":
             bifurcated_df = bifurcated_df[bifurcated_df["Promoter Tier"] == selected_tier]
             
-        display_cols = [
-            "Stock Name", "Industry", "Promoter Holding (%)", 
-            "Stock PE", "Industry PE", "PB", "ROCE"
-        ]
-        
+        display_cols = ["Stock Name", "Industry", "Promoter Holding (%)", "Stock PE", "Industry PE", "PB", "ROCE"]
         if not bifurcated_df.empty:
-            st.dataframe(
-                bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]),
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.warning("No portfolios pass matching criteria filters.")
+            st.dataframe(bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]), use_container_width=True, hide_index=True)
 
-# --- SCRIPT ENTRY POINT ---
 if __name__ == "__main__":
     run_integrated_pipeline()
