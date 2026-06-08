@@ -108,7 +108,6 @@ def run_nifty_50_scanner():
                 "Trend Status": trend
             })
             
-            # Pacing delay to remain safely within historical data rate limits
             time.sleep(0.35)
             
         except Exception as e:
@@ -121,26 +120,54 @@ def run_nifty_50_scanner():
     if scan_results:
         results_df = pd.DataFrame(scan_results)
         
-        bullish_count = len(results_df[results_df["Trend Status"] == "🟢 BULLISH"])
-        bearish_count = len(results_df[results_df["Trend Status"] == "🔴 BEARISH"])
+        # Split into two dataframes based on the crossover condition
+        bullish_df = results_df[results_df["Trend Status"] == "🟢 BULLISH"]
+        bearish_df = results_df[results_df["Trend Status"] == "🔴 BEARISH"]
         
+        # High-level summary metrics
         c1, c2, c3 = st.columns(3)
         c1.metric("Total Scanned", len(results_df))
-        c2.metric("Bullish Setups", bullish_count)
-        c3.metric("Bearish Setups", bearish_count)
+        c2.metric("Above Crossover (Bullish)", len(bullish_df))
+        c3.metric("Below Crossover (Bearish)", len(bearish_df))
         
-        st.dataframe(
-            results_df, 
-            use_container_width=True, 
-            hide_index=True,
-            column_config={
-                "RSI (14)": st.column_config.NumberColumn("RSI (14)", format="%.2f"),
-                "LTP": st.column_config.NumberColumn("Price (₹)", format="%.2f")
-            }
-        )
+        st.divider()
+        
+        # Section 1: Above Crossover
+        st.subheader("📈 Stocks Above EMA 9-26 Crossover (Bullish Trend)")
+        if not bullish_df.empty:
+            st.dataframe(
+                bullish_df.drop(columns=["Trend Status"]), 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "RSI (14)": st.column_config.NumberColumn("RSI (14)", format="%.2f"),
+                    "LTP": st.column_config.NumberColumn("Price (₹)", format="%.2f")
+                }
+            )
+        else:
+            st.info("No stocks currently above the crossover.")
+            
+        st.divider()
+        
+        # Section 2: Below Crossover
+        st.subheader("📉 Stocks Below EMA 9-26 Crossover (Bearish Trend)")
+        if not bearish_df.empty:
+            st.dataframe(
+                bearish_df.drop(columns=["Trend Status"]), 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "RSI (14)": st.column_config.NumberColumn("RSI (14)", format="%.2f"),
+                    "LTP": st.column_config.NumberColumn("Price (₹)", format="%.2f")
+                }
+            )
+        else:
+            st.info("No stocks currently below the crossover.")
+            
     else:
         st.warning("No data retrieved during scan.")
         
     st.write(f"Last data pull complete at: {datetime.now().strftime('%H:%M:%S')}")
 
 run_nifty_50_scanner()
+
