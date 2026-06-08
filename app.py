@@ -63,7 +63,7 @@ def load_metadata():
         # Healthcare & Pharmaceuticals
         "APOLLOHOSP": "Healthcare", "CIPLA": "Pharmaceuticals", "DRREDDY": "Pharmaceuticals", "SUNPHARMA": "Pharmaceuticals", 
         "LUPIN": "Pharmaceuticals", "AUROPHARMA": "Pharmaceuticals", "ALKEM": "Pharmaceuticals", "APLLTD": "Pharmaceuticals", 
-        "BIOCON": "Pharmaceuticals", "DIVISLAB", "Pharmaceuticals", "FORTIS": "Healthcare", "GLAND": "Pharmaceuticals", 
+        "BIOCON": "Pharmaceuticals", "DIVISLAB": "Pharmaceuticals", "FORTIS": "Healthcare", "GLAND": "Pharmaceuticals", 
         "IPCALAB": "Pharmaceuticals", "MAXHEALTH": "Healthcare", "METROPOLIS": "Healthcare", "SANOFI": "Pharmaceuticals", 
         "GLENMARK": "Pharmaceuticals", "GRANULES": "Pharmaceuticals", "SYNGENE": "Pharmaceuticals", "TORNTPHARM": "Pharmaceuticals",
         
