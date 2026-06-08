@@ -419,26 +419,6 @@ def run_integrated_pipeline():
 
 if __name__ == "__main__":
     run_integrated_pipeline()
-import streamlit as st
-import pandas as pd
-import pandas_ta as ta
-from datetime import datetime, timedelta
-import time
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from kiteconnect import KiteConnect
-
-st.set_page_config(layout="wide")
-st.title("🎯 NIFTY 50 Blue-Chip Multi-Timeframe Structural Scanner")
-
-# --- INITIALIZATION ---
-@st.cache_resource
-def get_kite():
-    api_key = st.secrets["api_key"]
-    access_token = st.secrets["access_token"]
-    kite = KiteConnect(api_key=api_key, timeout=15)
-    kite.set_access_token(access_token)
-    return kite
 
 @st.cache_data(ttl=86400)
 def get_instrument_lookup():
