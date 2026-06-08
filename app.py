@@ -9,16 +9,36 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from kiteconnect import KiteConnect
 
 # --- PAGE CONFIG ---
-st.set_page_config(layout="wide", page_title="NIFTY 50 Professional Scanner")
+st.set_page_config(layout="wide", page_title="NIFTY 50 Pro Structural Scanner")
 
-# --- CSS & STYLING ---
+# --- CUSTOM CSS: TERMINAL STYLING ---
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; color: #ffffff; }
-    h1, h2, h3 { color: #00ffcc !important; text-align: center; }
-    [data-testid="stMetricValue"] { color: #00ffcc; font-size: 24px; }
-    [data-testid="stMetricLabel"] { color: #888; font-size: 14px; }
-    .css-1r6slp0 { background-color: #1e1e1e; padding: 20px; border-radius: 10px; }
+    /* Global Container */
+    .stApp { background-color: #00008B; color: white; }
+    
+    /* Headers - Yellow */
+    h1, h2, h3 { color: yellow !important; text-align: center; font-family: 'Courier New', monospace; }
+    
+    /* Table Styling - Faint Yellow Background, Black Text */
+    div[data-testid="stDataFrame"] {
+        background-color: #FFFFE0 !important;
+        border: 2px solid yellow;
+    }
+    div[data-testid="stDataFrame"] * {
+        color: #000000 !important;
+    }
+    
+    /* Buttons */
+    .stButton>button {
+        background-color: yellow !important;
+        color: black !important;
+        font-weight: bold;
+    }
+
+    /* Metric Cards */
+    [data-testid="stMetricValue"] { color: yellow; }
+    [data-testid="stMetricLabel"] { color: white; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -31,76 +51,39 @@ def get_kite():
     kite.set_access_token(access_token)
     return kite
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=3600)
 def get_instrument_lookup():
     kite = get_kite()
-    try:
-        instruments = kite.instruments("NSE")
-        return {inst['tradingsymbol']: str(inst['instrument_token']) for inst in instruments}
-    except: return {}
+    instruments = kite.instruments("NSE")
+    return {inst['tradingsymbol']: str(inst['instrument_token']) for inst in instruments}
 
 def fetch_india_vix(kite):
     try: return float(kite.ltp("NSE:INDIA VIX")["NSE:INDIA VIX"]["last_price"])
     except: return 14.5
 
-def get_full_nifty50_universe():
+# --- FULL NIFTY 50 METADATA ---
+def get_nifty50_universe():
     return {
-        "ADANIENT": {"Industry": "Metals", "Promoter": 72.6, "PE": 45.2, "Ind_PE": 24.1, "PB": 4.2, "ROCE": 12.5},
-        "ADANIPORTS": {"Industry": "Infra", "Promoter": 65.3, "PE": 33.1, "Ind_PE": 28.5, "PB": 3.9, "ROCE": 14.8},
-        "APOLLOHOSP": {"Industry": "Healthcare", "Promoter": 29.3, "PE": 78.4, "Ind_PE": 38.2, "PB": 9.1, "ROCE": 16.2},
-        "ASIANPAINT": {"Industry": "Consumer", "Promoter": 52.6, "PE": 55.4, "Ind_PE": 51.2, "PB": 14.2, "ROCE": 34.1},
-        "AXISBANK": {"Industry": "Finance", "Promoter": 0.0, "PE": 14.1, "Ind_PE": 15.2, "PB": 2.1, "ROCE": 11.2},
-        "BAJAJ-AUTO": {"Industry": "Auto", "Promoter": 55.0, "PE": 31.2, "Ind_PE": 26.4, "PB": 8.4, "ROCE": 30.5},
-        "BAJFINANCE": {"Industry": "Finance", "Promoter": 54.7, "PE": 28.3, "Ind_PE": 22.1, "PB": 5.8, "ROCE": 17.4},
-        "BAJAJFINSV": {"Industry": "Finance", "Promoter": 60.7, "PE": 33.4, "Ind_PE": 22.1, "PB": 4.1, "ROCE": 14.9},
-        "BEL": {"Industry": "Defence", "Promoter": 51.1, "PE": 42.6, "Ind_PE": 35.4, "PB": 7.8, "ROCE": 26.3},
-        "BHARTIARTL": {"Industry": "Telecom", "Promoter": 53.1, "PE": 52.1, "Ind_PE": 41.3, "PB": 8.9, "ROCE": 18.2},
-        "BPCL": {"Industry": "Oil & Gas", "Promoter": 53.0, "PE": 11.4, "Ind_PE": 12.8, "PB": 1.7, "ROCE": 22.1},
-        "BRITANNIA": {"Industry": "FMCG", "Promoter": 50.5, "PE": 54.3, "Ind_PE": 44.2, "PB": 28.1, "ROCE": 48.6},
-        "CIPLA": {"Industry": "Healthcare", "Promoter": 33.4, "PE": 29.6, "Ind_PE": 31.4, "PB": 4.3, "ROCE": 21.3},
-        "COALINDIA": {"Industry": "Mining", "Promoter": 63.1, "PE": 9.2, "Ind_PE": 12.8, "PB": 3.4, "ROCE": 54.2},
-        "DRREDDY": {"Industry": "Healthcare", "Promoter": 26.7, "PE": 18.9, "Ind_PE": 31.4, "PB": 3.1, "ROCE": 24.5},
-        "EICHERMOT": {"Industry": "Auto", "Promoter": 49.2, "PE": 29.1, "Ind_PE": 26.4, "PB": 7.2, "ROCE": 27.8},
-        "GRASIM": {"Industry": "Cement", "Promoter": 42.7, "PE": 44.1, "Ind_PE": 32.1, "PB": 1.9, "ROCE": 9.4},
-        "HCLTECH": {"Industry": "IT", "Promoter": 60.8, "PE": 25.4, "Ind_PE": 28.2, "PB": 6.1, "ROCE": 28.9},
-        "HDFCBANK": {"Industry": "Finance", "Promoter": 0.0, "PE": 18.2, "Ind_PE": 15.2, "PB": 2.6, "ROCE": 12.1},
-        "HDFCLIFE": {"Industry": "Finance", "Promoter": 50.4, "PE": 61.2, "Ind_PE": 55.4, "PB": 4.8, "ROCE": 14.2},
-        "HINDALCO": {"Industry": "Metals", "Promoter": 34.6, "PE": 16.3, "Ind_PE": 18.4, "PB": 1.8, "ROCE": 13.1},
-        "HINDUNILVR": {"Industry": "FMCG", "Promoter": 61.9, "PE": 56.2, "Ind_PE": 44.2, "PB": 11.4, "ROCE": 39.5},
-        "ICICIBANK": {"Industry": "Finance", "Promoter": 0.0, "PE": 17.4, "Ind_PE": 15.2, "PB": 3.1, "ROCE": 13.4},
-        "INDUSINDBK": {"Industry": "Finance", "Promoter": 16.5, "PE": 13.2, "Ind_PE": 15.2, "PB": 1.8, "ROCE": 11.7},
-        "INFY": {"Industry": "IT", "Promoter": 14.8, "PE": 24.1, "Ind_PE": 28.2, "PB": 7.4, "ROCE": 37.2},
-        "INDIGO": {"Industry": "Infra", "Promoter": 57.3, "PE": 21.4, "Ind_PE": 25.1, "PB": 5.2, "ROCE": 22.4},
-        "ITC": {"Industry": "FMCG", "Promoter": 0.0, "PE": 26.4, "Ind_PE": 44.2, "PB": 7.9, "ROCE": 38.7},
-        "JSWSTEEL": {"Industry": "Metals", "Promoter": 44.8, "PE": 27.2, "Ind_PE": 18.4, "PB": 3.2, "ROCE": 14.1},
-        "JIOFIN": {"Industry": "Finance", "Promoter": 47.1, "PE": 120.5, "Ind_PE": 22.1, "PB": 2.1, "ROCE": 6.2},
-        "KOTAKBANK": {"Industry": "Finance", "Promoter": 25.9, "PE": 19.1, "Ind_PE": 15.2, "PB": 2.9, "ROCE": 12.8},
-        "LT": {"Industry": "Construction", "Promoter": 0.0, "PE": 36.4, "Ind_PE": 31.2, "PB": 4.8, "ROCE": 15.1},
-        "M&M": {"Industry": "Auto", "Promoter": 19.3, "PE": 28.4, "Ind_PE": 26.4, "PB": 4.9, "ROCE": 19.2},
-        "MARUTI": {"Industry": "Auto", "Promoter": 58.2, "PE": 27.5, "Ind_PE": 26.4, "PB": 5.1, "ROCE": 21.4},
-        "MAXHEALTH": {"Industry": "Healthcare", "Promoter": 23.1, "PE": 68.2, "Ind_PE": 38.2, "PB": 8.4, "ROCE": 15.5},
-        "NESTLEIND": {"Industry": "FMCG", "Promoter": 62.8, "PE": 74.2, "Ind_PE": 44.2, "PB": 21.4, "ROCE": 58.1},
-        "NTPC": {"Industry": "Power", "Promoter": 51.1, "PE": 17.5, "Ind_PE": 19.4, "PB": 2.4, "ROCE": 11.9},
-        "ONGC": {"Industry": "Oil & Gas", "Promoter": 58.9, "PE": 8.1, "Ind_PE": 12.8, "PB": 1.1, "ROCE": 14.5},
-        "POWERGRID": {"Industry": "Power", "Promoter": 51.3, "PE": 16.2, "Ind_PE": 19.4, "PB": 2.9, "ROCE": 12.4},
-        "RELIANCE": {"Industry": "Oil & Gas", "Promoter": 50.3, "PE": 26.1, "Ind_PE": 12.8, "PB": 2.4, "ROCE": 10.2},
-        "SBILIFE": {"Industry": "Finance", "Promoter": 55.4, "PE": 78.1, "Ind_PE": 55.4, "PB": 9.5, "ROCE": 13.1},
-        "SBIN": {"Industry": "Finance", "Promoter": 57.5, "PE": 10.4, "Ind_PE": 15.2, "PB": 1.6, "ROCE": 11.8},
-        "SHRIRAMFIN": {"Industry": "Finance", "Promoter": 25.4, "PE": 14.8, "Ind_PE": 22.1, "PB": 2.2, "ROCE": 15.4},
-        "SUNPHARMA": {"Industry": "Healthcare", "Promoter": 54.5, "PE": 36.2, "Ind_PE": 31.4, "PB": 4.9, "ROCE": 17.2},
-        "TATACONSUM": {"Industry": "FMCG", "Promoter": 34.4, "PE": 64.1, "Ind_PE": 44.2, "PB": 4.1, "ROCE": 9.8},
-        "TATAMOTORS": {"Industry": "Auto", "Promoter": 46.4, "PE": 11.5, "Ind_PE": 26.4, "PB": 3.2, "ROCE": 20.1},
-        "TATASTEEL": {"Industry": "Metals", "Promoter": 33.2, "PE": 38.4, "Ind_PE": 18.4, "PB": 1.7, "ROCE": 10.5},
-        "TCS": {"Industry": "IT", "Promoter": 72.4, "PE": 29.5, "Ind_PE": 28.2, "PB": 12.8, "ROCE": 51.4},
-        "TECHM": {"Industry": "IT", "Promoter": 35.1, "PE": 48.2, "Ind_PE": 28.2, "PB": 3.8, "ROCE": 15.9},
-        "TITAN": {"Industry": "Consumer", "Promoter": 52.9, "PE": 82.1, "Ind_PE": 51.2, "PB": 19.4, "ROCE": 25.1},
-        "TRENT": {"Industry": "Retail", "Promoter": 37.0, "PE": 145.2, "Ind_PE": 68.4, "PB": 28.4, "ROCE": 24.3},
-        "ULTRACEMCO": {"Industry": "Cement", "Promoter": 60.0, "PE": 41.2, "Ind_PE": 32.1, "PB": 4.7, "ROCE": 13.8},
-        "UPL": {"Industry": "Chemicals", "Promoter": 32.4, "PE": 22.1, "Ind_PE": 19.5, "PB": 1.5, "ROCE": 11.1},
-        "WIPRO": {"Industry": "IT", "Promoter": 72.9, "PE": 23.4, "Ind_PE": 28.2, "PB": 3.4, "ROCE": 21.2}
+        "RELIANCE": {"Industry": "Oil & Gas"}, "TCS": {"Industry": "IT"}, "HDFCBANK": {"Industry": "Banking"},
+        "ICICIBANK": {"Industry": "Banking"}, "INFY": {"Industry": "IT"}, "HINDUNILVR": {"Industry": "FMCG"},
+        "ITC": {"Industry": "FMCG"}, "LT": {"Industry": "Construction"}, "SBIN": {"Industry": "Banking"},
+        "BHARTIARTL": {"Industry": "Telecom"}, "BAJFINANCE": {"Industry": "Finance"}, "KOTAKBANK": {"Industry": "Banking"},
+        "ASIANPAINT": {"Industry": "Paints"}, "HCLTECH": {"Industry": "IT"}, "MARUTI": {"Industry": "Auto"},
+        "SUNPHARMA": {"Industry": "Pharma"}, "AXISBANK": {"Industry": "Banking"}, "TITAN": {"Industry": "Retail"},
+        "ULTRACEMCO": {"Industry": "Cement"}, "TATAMOTORS": {"Industry": "Auto"}, "M&M": {"Industry": "Auto"},
+        "NESTLEIND": {"Industry": "FMCG"}, "POWERGRID": {"Industry": "Power"}, "TATASTEEL": {"Industry": "Metals"},
+        "NTPC": {"Industry": "Power"}, "JSWSTEEL": {"Industry": "Metals"}, "BAJAJFINSV": {"Industry": "Finance"},
+        "GRASIM": {"Industry": "Cement"}, "HDFCLIFE": {"Industry": "Insurance"}, "WIPRO": {"Industry": "IT"},
+        "TECHM": {"Industry": "IT"}, "ADANIENT": {"Industry": "Metals"}, "ADANIPORTS": {"Industry": "Infra"},
+        "BPCL": {"Industry": "Oil & Gas"}, "DRREDDY": {"Industry": "Pharma"}, "CIPLA": {"Industry": "Pharma"},
+        "BRITANNIA": {"Industry": "FMCG"}, "SBILIFE": {"Industry": "Insurance"}, "EICHERMOT": {"Industry": "Auto"},
+        "TATACONSUM": {"Industry": "FMCG"}, "HEROMOTOCO": {"Industry": "Auto"}, "DIVISLAB": {"Industry": "Pharma"},
+        "APOLLOHOSP": {"Industry": "Healthcare"}, "INDUSINDBK": {"Industry": "Banking"}, "LTIM": {"Industry": "IT"},
+        "BEL": {"Industry": "Defence"}, "COALINDIA": {"Industry": "Mining"}, "SHRIRAMFIN": {"Industry": "Finance"},
+        "BAJAJ-AUTO": {"Industry": "Auto"}, "ONGC": {"Industry": "Oil & Gas"}
     }
 
-# --- INDICATORS & PIVOT ---
+# --- INDICATOR & PIVOT LOGIC ---
 def calculate_indicators(df):
     df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
     df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
@@ -108,51 +91,83 @@ def calculate_indicators(df):
     return df
 
 def calculate_session_pivots(df_1d):
+    # Anchor calculation based on previous day's high/low/close
     prev_day = df_1d.iloc[-2]
     high, low, close = float(prev_day['high']), float(prev_day['low']), float(prev_day['close'])
     p = (high + low + close) / 3.0
     return round(p, 2), round(p + 0.382 * (high - low), 2), round(p - 0.382 * (high - low), 2)
 
-# --- SCANNER ENGINE ---
-def run_scanner():
-    st.title("🎯 NIFTY 50 Structural Scanner")
+# --- THREADED SCANNER ENGINE ---
+def scan_stock(symbol, token, kite):
+    try:
+        from_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+        to_date = datetime.now().strftime('%Y-%m-%d')
+        
+        hist_1d = kite.historical_data(token, from_date, to_date, interval="day")
+        hist_15m = kite.historical_data(token, from_date, to_date, interval="15minute")
+        
+        df_1d = calculate_indicators(pd.DataFrame(hist_1d))
+        df_15m = calculate_indicators(pd.DataFrame(hist_15m))
+        
+        latest = df_15m.iloc[-1]
+        p, r1, s1 = calculate_session_pivots(df_1d)
+        
+        # Structural Signal Generation
+        # VWMA 9/26 Crossover + Pivot Proximity
+        signal = "NEUTRAL"
+        if latest['close'] > latest['VWMA_9'] and latest['close'] > p: signal = "BUY"
+        elif latest['close'] < latest['VWMA_9'] and latest['close'] < p: signal = "SELL"
+        
+        return {
+            "Stock": symbol, "LTP": latest['close'], "Signal": signal, 
+            "RSI": round(latest['RSI'], 2), "Pivot": p, "R1": r1, "S1": s1
+        }
+    except: return None
+
+# --- MAIN DASHBOARD ---
+def main():
+    st.title("🎯 NIFTY 50 STRUCTURAL SCANNER")
     kite = get_kite()
     vix = fetch_india_vix(kite)
     
-    # UI Header
+    # UI METRICS
     c1, c2, c3 = st.columns(3)
     c1.metric("India VIX", vix)
-    c2.metric("Regime", "Trending" if vix < 15 else "Volatile")
-    c3.metric("System", "Online")
+    c2.metric("Market Regime", "VOLATILE" if vix > 15 else "STABLE")
+    c3.metric("Engine Status", "ONLINE")
     
-    universe = get_full_nifty50_universe()
-    lookup = get_instrument_lookup()
-    
-    if st.button("🚀 Execute Scan"):
+    st.divider()
+
+    if st.button("🚀 EXECUTE STRUCTURAL SCAN"):
+        universe = get_nifty50_universe()
+        lookup = get_instrument_lookup()
+        
         results = []
-        for symbol, data in universe.items():
-            token = lookup.get(symbol)
-            if token:
-                # Mock logic - insert your full historical fetch logic here
-                results.append({
-                    "Stock": symbol,
-                    "Signal": "🟢 BUY" if vix < 15 else "🔴 SELL",
-                    "RSI": 65.0,
-                    "LTP": 1200.0,
-                    "Industry": data["Industry"]
-                })
+        with ThreadPoolExecutor(max_workers=15) as executor:
+            futures = [executor.submit(scan_stock, sym, lookup.get(sym), kite) for sym in universe.keys() if lookup.get(sym)]
+            for f in as_completed(futures):
+                if f.result(): results.append(f.result())
+        
         st.session_state.df = pd.DataFrame(results)
 
-    # Display results with Config
     if "df" in st.session_state:
+        # Define Styling Function for Grid
+        def apply_styling(df):
+            # Styling Signal Column Green/Red
+            def color_signal(val):
+                return 'color: green' if val == 'BUY' else 'color: red' if val == 'SELL' else 'color: black'
+            
+            # Applying styling
+            return df.style.applymap(color_signal, subset=['Signal'])
+
+        st.subheader("TECHNICAL STRUCTURAL MATRIX")
         st.dataframe(
-            st.session_state.df,
+            apply_styling(st.session_state.df), 
+            use_container_width=True,
             column_config={
-                "RSI": st.column_config.ProgressColumn("RSI", min_value=0, max_value=100, format="%f"),
-                "Signal": st.column_config.TextColumn("Action")
-            },
-            use_container_width=True
+                "RSI": st.column_config.ProgressColumn("RSI Trend", min_value=0, max_value=100, format="%f")
+            }
         )
 
 if __name__ == "__main__":
-    run_scanner()
+    main()
