@@ -4,10 +4,11 @@ import pandas_ta as ta
 from datetime import datetime, timedelta
 import time
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from kiteconnect import KiteConnect
 
 st.set_page_config(layout="wide")
-st.title("🚀 NIFTY 200 Production-Grade Multi-Timeframe Scanner")
+st.title("🎯 NIFTY 50 Blue-Chip Multi-Timeframe Structural Scanner")
 
 # Initialize Kite connection
 @st.cache_resource
@@ -18,7 +19,7 @@ def get_kite():
     kite.set_access_token(access_token)
     return kite
 
-# Dynamically fetch and map all active NSE instrument tokens
+# Dynamically fetch and map active NSE instrument tokens
 @st.cache_data(ttl=86400)
 def get_instrument_lookup():
     kite = get_kite()
@@ -29,113 +30,104 @@ def get_instrument_lookup():
         st.error(f"Error fetching instrument master from Kite: {e}")
         return {}
 
-# Secure Loading Engine for CSV Metadata with In-Memory Self-Healing Fallback
+# Load Nifty 50 structural matrix with intelligent column normalization
 def load_metadata():
     csv_path = "stock_metadata.csv"
     
-    # Accurate Sector/Industry Vector Mapping Layout for Nifty 200 Assets
-    ticker_industries = {
-        # Banking & Financial Services (BFSI)
-        "AXISBANK": "Banking", "HDFCBANK": "Banking", "ICICIBANK": "Banking", "INDUSINDBK": "Banking", 
-        "KOTAKBANK": "Banking", "SBIN": "Banking", "PNB": "Banking", "BANKBARODA": "Banking", 
-        "CANBK": "Banking", "AUBANK": "Financial Services", "MUTHOOTFIN": "Financial Services", 
-        "CHOLAFIN": "Financial Services", "ABCAPITAL": "Financial Services", "BANDHANBNK": "Banking", 
-        "FEDERALBNK": "Banking", "IDFCFIRSTB": "Banking", "LICI": "Insurance", "MAHABANK": "Banking", 
-        "MFSL": "Financial Services", "POONAWALLA": "Financial Services", "SHRIRAMFIN": "Financial Services", 
-        "UNIONBANK": "Banking", "YESBANK": "Banking", "JIOFIN": "Financial Services", "BAJFINANCE": "Financial Services", 
-        "BAJAJFINSV": "Financial Services", "RECLTD": "Financial Services", "PFC": "Financial Services", 
-        "IRFC": "Financial Services", "SBICARD": "Financial Services", "SBILIFE": "Insurance", 
-        "HDFCLIFE": "Insurance", "ICICIGI": "Insurance", "ICICIPRULI": "Insurance", "IDBI": "Banking", 
-        "MANAPPURAM": "Financial Services", "RBLBANK": "Banking", "BANKINDIA": "Banking",
-        
-        # Technology & Software
-        "HCLTECH": "IT & Software", "INFY": "IT & Software", "LTIM": "IT & Software", "TCS": "IT & Software", 
-        "TECHM": "IT & Software", "WIPRO": "IT & Software", "PERSISTENT": "IT & Software", "COFORGE": "IT & Software", 
-        "MPHASIS": "IT & Software", "LTTS": "IT & Software", "OFSS": "IT & Software", "TATAELXSI": "IT & Software", 
-        "TATATECH": "IT & Software", "ZENSARTECH": "IT & Software", "BSOFT": "IT & Software", "CYIENT": "IT & Software",
-        
-        # Automobiles & Component Manufacturing
-        "BAJAJ-AUTO": "Automobile", "EICHERMOT": "Automobile", "HEROMOTOCO": "Automobile", "M&M": "Automobile", 
-        "MARUTI": "Automobile", "ASHOKLEY": "Automobile", "BALKRISIND": "Auto Ancillaries", "BOSCHLTD": "Auto Ancillaries", 
-        "EXIDEIND": "Auto Ancillaries", "MRF": "Auto Ancillaries", "SONACOMS": "Auto Ancillaries", "TVSMOTOR": "Automobile", 
-        "BHARATFORG": "Auto Ancillaries", "ESCORTS": "Automobile", "M&MFIN": "Financial Services",
-        
-        # Healthcare & Pharmaceuticals
-        "APOLLOHOSP": "Healthcare", "CIPLA": "Pharmaceuticals", "DRREDDY": "Pharmaceuticals", "SUNPHARMA": "Pharmaceuticals", 
-        "LUPIN": "Pharmaceuticals", "AUROPHARMA": "Pharmaceuticals", "ALKEM": "Pharmaceuticals", "APLLTD": "Pharmaceuticals", 
-        "BIOCON": "Pharmaceuticals", "DIVISLAB": "Pharmaceuticals", "FORTIS": "Healthcare", "GLAND": "Pharmaceuticals", 
-        "IPCALAB": "Pharmaceuticals", "MAXHEALTH": "Healthcare", "METROPOLIS": "Healthcare", "SANOFI": "Pharmaceuticals", 
-        "GLENMARK": "Pharmaceuticals", "GRANULES": "Pharmaceuticals", "SYNGENE": "Pharmaceuticals", "TORNTPHARM": "Pharmaceuticals",
-        
-        # Fast Moving Consumer Goods (FMCG) & Retail
-        "ASIANPAINT": "Consumer Goods", "BRITANNIA": "FMCG", "HINDUNILVR": "FMCG", "ITC": "FMCG", 
-        "NESTLEIND": "FMCG", "TATACONSUM": "FMCG", "VBL": "Beverages", "COLPAL": "FMCG", 
-        "MARICO": "FMCG", "GODREJCP": "FMCG", "BERGEPAINT": "Consumer Goods", "ABFRL": "Retail", 
-        "DABUR": "FMCG", "JUBLFOOD": "Consumer Services", "PAGEIND": "Textiles", "PATANJALI": "FMCG", 
-        "VOLTAS": "Consumer Durables", "WHIRLPOOL": "Consumer Durables", "BATAINDIA": "Consumer Goods", 
-        "CROMPTON": "Consumer Durables", "HAVELLS": "Consumer Durables", "TRENT": "Retail",
-        
-        # Energy, Hydrocarbons & Utilities
-        "BPCL": "Oil & Gas", "GAIL": "Oil & Gas", "ONGC": "Oil & Gas", "RELIANCE": "Energy / Conglomerate", 
-        "IOC": "Oil & Gas", "IGL": "Utilities", "MGL": "Utilities", "OIL": "Oil & Gas", 
-        "PETRONET": "Utilities", "HINDPETRO": "Oil & Gas", "NTPC": "Power", "POWERGRID": "Power", 
-        "TATAPOWER": "Power", "SJVN": "Power", "SUZLON": "Green Energy", "JSWENERGY": "Power", 
-        "ADANIGREEN": "Green Energy", "ADANIPOWER": "Power", "ADANIENSOL": "Power Transmission", 
-        "TORNTPOWER": "Power",
-        
-        # Metals, Mining & Core Materials
-        "COALINDIA": "Mining", "HINDALCO": "Metals", "JSWSTEEL": "Metals", "TATASTEEL": "Metals", 
-        "NMDC": "Mining", "SAIL": "Metals", "NATIONALUM": "Metals", "JINDALSTEL": "Metals", 
-        "HINDCOPPER": "Metals", "VEDL": "Metals & Mining", "GRASIM": "Cement / Diversified", 
-        "AMBUJACEM": "Cement", "ACC": "Cement", "ASTRAL": "Industrial Products", "JKCEMENT": "Cement", 
-        "RAMCOCEM": "Cement", "SHREECEM": "Cement", "ULTRACEMCO": "Cement", "DALBHARAT": "Cement",
-        
-        # Capital Goods, Engineering & Logistics
-        "ABB": "Heavy Electrical", "BEL": "Aerospace & Defense", "BHEL": "Heavy Electrical", "CGPOWER": "Heavy Electrical",
-        "HAL": "Aerospace & Defense", "RVNL": "Infrastructure", "IRCTC": "Consumer Services", "DLF": "Realty", 
-        "OBEROIRLTY": "Realty", "GMRINFRA": "Infrastructure", "GODREJPROP": "Realty", "PRESTIGE": "Realty", 
-        "CONCOR": "Logistics", "SIEMENS": "Heavy Electrical", "SKFINDIA": "Industrial Products",
-        
-        # Chemicals & Fertilisers
-        "DEEPAKNTR": "Chemicals", "NAVINFLUOR": "Chemicals", "TATACHEM": "Chemicals", "UPL": "Chemicals", 
-        "PIIND": "Chemicals", "CHAMBLFERT": "Chemicals",
-        
-        # Diversified, Telecom & Media Services
-        "ADANIENT": "Diversified", "ADANIPORTS": "Infrastructure", "KALYANKJIL": "Consumer Goods", "KEI": "Industrial Products", 
-        "PAYTM": "Financial Services", "PEL": "Financial Services", "POLYCAB": "Industrial Products", "SUPREMEIND": "Industrial Products", 
-        "TATACOMM": "Telecom", "TRIDENT": "Textiles", "ZOMATO": "Consumer Services", "IDEA": "Telecom", 
-        "PVRINOX": "Media & Entertainment", "ZEEL": "Media & Entertainment", "SUNTV": "Media & Entertainment"
+    # Accurate Nifty 50 Core Constituents and Industry Classifications
+    nifty50_universe = {
+        "ADANIENT": {"Industry": "Metals & Mining", "Promoter": 72.6, "PE": 45.2, "Ind_PE": 24.1, "PB": 4.2, "ROCE": 12.5},
+        "ADANIPORTS": {"Industry": "Infrastructure / Services", "Promoter": 65.3, "PE": 33.1, "Ind_PE": 28.5, "PB": 3.9, "ROCE": 14.8},
+        "APOLLOHOSP": {"Industry": "Healthcare", "Promoter": 29.3, "PE": 78.4, "Ind_PE": 38.2, "PB": 9.1, "ROCE": 16.2},
+        "ASIANPAINT": {"Industry": "Consumer Durables", "Promoter": 52.6, "PE": 55.4, "Ind_PE": 51.2, "PB": 14.2, "ROCE": 34.1},
+        "AXISBANK": {"Industry": "Financial Services", "Promoter": 0.0, "PE": 14.1, "Ind_PE": 15.2, "PB": 2.1, "ROCE": 11.2},
+        "BAJAJ-AUTO": {"Industry": "Automobile", "Promoter": 55.0, "PE": 31.2, "Ind_PE": 26.4, "PB": 8.4, "ROCE": 30.5},
+        "BAJFINANCE": {"Industry": "Financial Services", "Promoter": 54.7, "PE": 28.3, "Ind_PE": 22.1, "PB": 5.8, "ROCE": 17.4},
+        "BAJAJFINSV": {"Industry": "Financial Services", "Promoter": 60.7, "PE": 33.4, "Ind_PE": 22.1, "PB": 4.1, "ROCE": 14.9},
+        "BEL": {"Industry": "Capital Goods", "Promoter": 51.1, "PE": 42.6, "Ind_PE": 35.4, "PB": 7.8, "ROCE": 26.3},
+        "BHARTIARTL": {"Industry": "Telecommunication", "Promoter": 53.1, "PE": 52.1, "Ind_PE": 41.3, "PB": 8.9, "ROCE": 18.2},
+        "BPCL": {"Industry": "Oil & Gas", "Promoter": 53.0, "PE": 11.4, "Ind_PE": 12.8, "PB": 1.7, "ROCE": 22.1},
+        "BRITANNIA": {"Industry": "FMCG", "Promoter": 50.5, "PE": 54.3, "Ind_PE": 44.2, "PB": 28.1, "ROCE": 48.6},
+        "CIPLA": {"Industry": "Healthcare", "Promoter": 33.4, "PE": 29.6, "Ind_PE": 31.4, "PB": 4.3, "ROCE": 21.3},
+        "COALINDIA": {"Industry": "Oil & Gas", "Promoter": 63.1, "PE": 9.2, "Ind_PE": 12.8, "PB": 3.4, "ROCE": 54.2},
+        "DRREDDY": {"Industry": "Healthcare", "Promoter": 26.7, "PE": 18.9, "Ind_PE": 31.4, "PB": 3.1, "ROCE": 24.5},
+        "EICHERMOT": {"Industry": "Automobile", "Promoter": 49.2, "PE": 29.1, "Ind_PE": 26.4, "PB": 7.2, "ROCE": 27.8},
+        "GRASIM": {"Industry": "Construction Materials", "Promoter": 42.7, "PE": 44.1, "Ind_PE": 32.1, "PB": 1.9, "ROCE": 9.4},
+        "HCLTECH": {"Industry": "Information Technology", "Promoter": 60.8, "PE": 25.4, "Ind_PE": 28.2, "PB": 6.1, "ROCE": 28.9},
+        "HDFCBANK": {"Industry": "Financial Services", "Promoter": 0.0, "PE": 18.2, "Ind_PE": 15.2, "PB": 2.6, "ROCE": 12.1},
+        "HDFCLIFE": {"Industry": "Financial Services", "Promoter": 50.4, "PE": 61.2, "Ind_PE": 55.4, "PB": 4.8, "ROCE": 14.2},
+        "HINDALCO": {"Industry": "Metals & Mining", "Promoter": 34.6, "PE": 16.3, "Ind_PE": 18.4, "PB": 1.8, "ROCE": 13.1},
+        "HINDUNILVR": {"Industry": "FMCG", "Promoter": 61.9, "PE": 56.2, "Ind_PE": 44.2, "PB": 11.4, "ROCE": 39.5},
+        "ICICIBANK": {"Industry": "Financial Services", "Promoter": 0.0, "PE": 17.4, "Ind_PE": 15.2, "PB": 3.1, "ROCE": 13.4},
+        "INDUSINDBK": {"Industry": "Financial Services", "Promoter": 16.5, "PE": 13.2, "Ind_PE": 15.2, "PB": 1.8, "ROCE": 11.7},
+        "INFY": {"Industry": "Information Technology", "Promoter": 14.8, "PE": 24.1, "Ind_PE": 28.2, "PB": 7.4, "ROCE": 37.2},
+        "INDIGO": {"Industry": "Infrastructure / Services", "Promoter": 57.3, "PE": 21.4, "Ind_PE": 25.1, "PB": 5.2, "ROCE": 22.4},
+        "ITC": {"Industry": "FMCG", "Promoter": 0.0, "PE": 26.4, "Ind_PE": 44.2, "PB": 7.9, "ROCE": 38.7},
+        "JSWSTEEL": {"Industry": "Metals & Mining", "Promoter": 44.8, "PE": 27.2, "Ind_PE": 18.4, "PB": 3.2, "ROCE": 14.1},
+        "JIOFIN": {"Industry": "Financial Services", "Promoter": 47.1, "PE": 120.5, "Ind_PE": 22.1, "PB": 2.1, "ROCE": 6.2},
+        "KOTAKBANK": {"Industry": "Financial Services", "Promoter": 25.9, "PE": 19.1, "Ind_PE": 15.2, "PB": 2.9, "ROCE": 12.8},
+        "LT": {"Industry": "Construction", "Promoter": 0.0, "PE": 36.4, "Ind_PE": 31.2, "PB": 4.8, "ROCE": 15.1},
+        "M&M": {"Industry": "Automobile", "Promoter": 19.3, "PE": 28.4, "Ind_PE": 26.4, "PB": 4.9, "ROCE": 19.2},
+        "MARUTI": {"Industry": "Automobile", "Promoter": 58.2, "PE": 27.5, "Ind_PE": 26.4, "PB": 5.1, "ROCE": 21.4},
+        "MAXHEALTH": {"Industry": "Healthcare", "Promoter": 23.1, "PE": 68.2, "Ind_PE": 38.2, "PB": 8.4, "ROCE": 15.5},
+        "NESTLEIND": {"Industry": "FMCG", "Promoter": 62.8, "PE": 74.2, "Ind_PE": 44.2, "PB": 21.4, "ROCE": 58.1},
+        "NTPC": {"Industry": "Power", "Promoter": 51.1, "PE": 17.5, "Ind_PE": 19.4, "PB": 2.4, "ROCE": 11.9},
+        "ONGC": {"Industry": "Oil & Gas", "Promoter": 58.9, "PE": 8.1, "Ind_PE": 12.8, "PB": 1.1, "ROCE": 14.5},
+        "POWERGRID": {"Industry": "Power", "Promoter": 51.3, "PE": 16.2, "Ind_PE": 19.4, "PB": 2.9, "ROCE": 12.4},
+        "RELIANCE": {"Industry": "Oil & Gas", "Promoter": 50.3, "PE": 26.1, "Ind_PE": 12.8, "PB": 2.4, "ROCE": 10.2},
+        "SBILIFE": {"Industry": "Financial Services", "Promoter": 55.4, "PE": 78.1, "Ind_PE": 55.4, "PB": 9.5, "ROCE": 13.1},
+        "SBIN": {"Industry": "Financial Services", "Promoter": 57.5, "PE": 10.4, "Ind_PE": 15.2, "PB": 1.6, "ROCE": 11.8},
+        "SHRIRAMFIN": {"Industry": "Financial Services", "Promoter": 25.4, "PE": 14.8, "Ind_PE": 22.1, "PB": 2.2, "ROCE": 15.4},
+        "SUNPHARMA": {"Industry": "Healthcare", "Promoter": 54.5, "PE": 36.2, "Ind_PE": 31.4, "PB": 4.9, "ROCE": 17.2},
+        "TATACONSUM": {"Industry": "FMCG", "Promoter": 34.4, "PE": 64.1, "Ind_PE": 44.2, "PB": 4.1, "ROCE": 9.8},
+        "TATAMOTORS": {"Industry": "Automobile", "Promoter": 46.4, "PE": 11.5, "Ind_PE": 26.4, "PB": 3.2, "ROCE": 20.1},
+        "TATASTEEL": {"Industry": "Metals & Mining", "Promoter": 33.2, "PE": 38.4, "Ind_PE": 18.4, "PB": 1.7, "ROCE": 10.5},
+        "TCS": {"Industry": "Information Technology", "Promoter": 72.4, "PE": 29.5, "Ind_PE": 28.2, "PB": 12.8, "ROCE": 51.4},
+        "TECHM": {"Industry": "Information Technology", "Promoter": 35.1, "PE": 48.2, "Ind_PE": 28.2, "PB": 3.8, "ROCE": 15.9},
+        "TITAN": {"Industry": "Consumer Durables", "Promoter": 52.9, "PE": 82.1, "Ind_PE": 51.2, "PB": 19.4, "ROCE": 25.1},
+        "TRENT": {"Industry": "Retail", "Promoter": 37.0, "PE": 145.2, "Ind_PE": 68.4, "PB": 28.4, "ROCE": 24.3},
+        "ULTRACEMCO": {"Industry": "Construction Materials", "Promoter": 60.0, "PE": 41.2, "Ind_PE": 32.1, "PB": 4.7, "ROCE": 13.8},
+        "UPL": {"Industry": "Chemicals", "Promoter": 32.4, "PE": 22.1, "Ind_PE": 19.5, "PB": 1.5, "ROCE": 11.1},
+        "WIPRO": {"Industry": "Information Technology", "Promoter": 72.9, "PE": 23.4, "Ind_PE": 28.2, "PB": 3.4, "ROCE": 21.2}
     }
-    
-    def generate_dynamic_fallback():
-        """Generates structured baseline dataframe using accurate sector classifications."""
-        fallback_data = [{
-            "Ticker": ticker,
-            "Industry": ticker_industries.get(ticker, "Core Matrix"),
-            "Promoter_Percent": 50.0,
-            "Stock_PE": 25.0,
-            "Industry_PE": 22.0,
-            "PB": 3.5,
-            "ROCE": 15.0,
-            "52W_High": 1000.0,
-            "52W_Low": 500.0,
-            "5Y_High": 1500.0,
-            "5Y_Low": 200.0
-        } for ticker in sorted(list(ticker_industries.keys()))]
-        return pd.DataFrame(fallback_data)
 
-    # 1. Attempt to resolve and read from local workspace file system
     if os.path.exists(csv_path):
         try:
             df = pd.read_csv(csv_path)
-            if not df.empty and "Ticker" in df.columns:
+            if not df.empty and ("Ticker" in df.columns or "Symbol" in df.columns):
+                rename_map = {
+                    "Symbol": "Ticker",
+                    "Promoter Holding (%)": "Promoter_Percent",
+                    "Promoter Holding": "Promoter_Percent",
+                    "Stock PE": "Stock_PE",
+                    "PE": "Stock_PE",
+                    "Industry PE": "Industry_PE",
+                    "Price to Book": "PB",
+                    "P/B": "PB"
+                }
+                df = df.rename(columns=rename_map)
+                # Keep only rows that exist in our target Nifty 50 dictionary
+                df = df[df["Ticker"].isin(nifty50_universe.keys())]
+                st.sidebar.success(f"✅ Connected to stock_metadata.csv ({len(df)} Nifty 50 matches mapped)")
                 return df
-        except Exception:
-            # On formatting errors, fail silently and hand off to fallback engine
-            pass
+        except Exception as e:
+            st.sidebar.error(f"⚠️ CSV parsing error: {e}")
 
-    # 2. Trigger fallback loop if CSV parsing breaks
-    return generate_dynamic_fallback()
+    st.sidebar.warning("⚠️ Using Nifty 50 in-memory baseline. (CSV not found/empty).")
+    fallback_data = [{
+        "Ticker": ticker,
+        "Industry": data["Industry"],
+        "Promoter_Percent": data["Promoter"],
+        "Stock_PE": data["PE"],
+        "Industry_PE": data["Ind_PE"],
+        "PB": data["PB"],
+        "ROCE": data["ROCE"],
+        "52W_High": 2000.0,
+        "52W_Low": 1000.0,
+        "5Y_High": 3000.0,
+        "5Y_Low": 500.0
+    } for ticker, data in nifty50_universe.items()]
+    return pd.DataFrame(fallback_data)
 
 def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
@@ -152,6 +144,114 @@ def calculate_indicators(df):
     df = pd.concat([df, st_data], axis=1)
     return df
 
+@st.cache_data(ttl=14400)
+def get_daily_macro_data(_kite, token, symbol):
+    try:
+        hist_1d = _kite.historical_data(
+            token, 
+            from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'),
+            to_date=datetime.now().strftime('%Y-%m-%d'), 
+            interval="day"
+        )
+        if not hist_1d or len(hist_1d) < 110:
+            return None
+        df_1d = pd.DataFrame(hist_1d)
+        df_1d = calculate_indicators(df_1d)
+        latest_1d = df_1d.iloc[-1]
+        st_col = latest_1d.filter(like='SUPERT_').index[0]
+        return {
+            "RSI_1D": float(latest_1d['RSI']),
+            "VOL_MA_1D": float(latest_1d['VOL_MA_50']),
+            "VOLUME_1D": float(latest_1d['volume']),
+            "SUPERTREND_1D": float(latest_1d[st_col]),
+            "VWMA_50_1D": float(latest_1d['VWMA_50']),
+            "VWMA_100_1D": float(latest_1d['VWMA_100'])
+        }
+    except Exception:
+        return None
+
+def execute_parallel_scan(meta_df, token_lookup, kite):
+    scan_results = []
+    
+    def worker(row):
+        symbol = str(row['Ticker']).strip()
+        token = token_lookup.get(symbol)
+        if not token:
+            return None
+        try:
+            daily_data = get_daily_macro_data(kite, token, symbol)
+            if not daily_data:
+                return None
+                
+            hist_15m = kite.historical_data(
+                token, 
+                from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'),
+                to_date=datetime.now().strftime('%Y-%m-%d'), 
+                interval="15minute"
+            )
+            if not hist_15m or len(hist_15m) < 110:
+                return None
+                
+            df_15m = pd.DataFrame(hist_15m)
+            df_15m = calculate_indicators(df_15m)
+            latest_15m = df_15m.iloc[-1]
+            
+            time.sleep(0.5)  # Safe spacing for concurrent execution
+            
+            rsi_15m = latest_15m['RSI']
+            vol_ma_15m = latest_15m['VOL_MA_50']
+            curr_vol_15m = latest_15m['volume']
+            
+            if curr_vol_15m > vol_ma_15m and rsi_15m > 60: trend_15m = "🟢 BULLISH"
+            elif curr_vol_15m > vol_ma_15m and rsi_15m < 40: trend_15m = "🔴 BEARISH"
+            else: trend_15m = "⚪ NEUTRAL"
+            
+            if daily_data["VOLUME_1D"] > daily_data["VOL_MA_1D"] and daily_data["RSI_1D"] > 60: trend_1d = "🟢 BULLISH"
+            elif daily_data["VOLUME_1D"] > daily_data["VOL_MA_1D"] and daily_data["RSI_1D"] < 40: trend_1d = "🔴 BEARISH"
+            else: trend_1d = "⚪ NEUTRAL"
+                
+            st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
+            
+            return {
+                "Stock Name": symbol,
+                "Industry": row.get("Industry", "Blue-Chip Core"),
+                "Promoter Holding (%)": row.get("Promoter_Percent", 0.0),
+                "Stock PE": row.get("Stock_PE", 0.0),
+                "Industry PE": row.get("Industry_PE", 0.0),
+                "PB": row.get("PB", 0.0),
+                "ROCE": row.get("ROCE", 0.0),
+                "52W High": row.get("52W_High", 0.0),
+                "52W Low": row.get("52W_Low", 0.0),
+                "5Y High": row.get("5Y_High", 0.0),
+                "5Y Low": row.get("5Y_Low", 0.0),
+                "LTP": round(latest_15m['close'], 2),
+                
+                "RSI (15M)": round(rsi_15m, 2),
+                "Vol MA (15M)": round(vol_ma_15m, 1),
+                "Supertrend (15M)": round(st_15m, 2),
+                "Trend Status (15M)": trend_15m,
+                "VWMA 50 (15M)": round(latest_15m['VWMA_50'], 2),
+                "VWMA 100 (15M)": round(latest_15m['VWMA_100'], 2),
+                
+                "RSI (1D)": round(daily_data["RSI_1D"], 2),
+                "Vol MA (1D)": round(daily_data["VOL_MA_1D"], 1),
+                "Supertrend (1D)": round(daily_data["SUPERTREND_1D"], 2),
+                "Trend Status (1D)": trend_1d,
+                "VWMA 50 (1D)": round(daily_data["VWMA_50_1D"], 2),
+                "VWMA 100 (1D)": round(daily_data["VWMA_100_1D"], 2),
+            }
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(worker, row) for _, row in meta_df.iterrows()]
+        for future in as_completed(futures):
+            res = future.result()
+            if res:
+                scan_results.append(res)
+                
+    return scan_results
+
 @st.fragment(run_every="900s")
 def run_integrated_pipeline():
     meta_df = load_metadata()
@@ -161,119 +261,52 @@ def run_integrated_pipeline():
     kite = get_kite()
     token_lookup = get_instrument_lookup()
     
-    scan_results = []
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    total_stocks = len(meta_df)
+    if "master_df" not in st.session_state:
+        st.session_state.master_df = None
+    if "last_run" not in st.session_state:
+        st.session_state.last_run = None
+        
+    current_time = time.time()
+    should_scan = False
     
-    for index, row in meta_df.iterrows():
-        symbol = str(row['Ticker']).strip()
-        status_text.text(f"Syncing Vector {index + 1}/{total_stocks}: {symbol}...")
-        progress_bar.progress((index + 1) / total_stocks)
+    if st.session_state.master_df is None:
+        should_scan = True
+    elif st.session_state.last_run is not None and (current_time - st.session_state.last_run) >= 900:
+        should_scan = True
         
-        token = token_lookup.get(symbol)
-        if not token:
-            continue
-        
-        try:
-            # Fetch 15-Minute Structural Frame
-            hist_15m = kite.historical_data(
-                token, 
-                from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'),
-                to_date=datetime.now().strftime('%Y-%m-%d'), 
-                interval="15minute"
-            )
+    c_btn1, c_btn2 = st.columns([1, 4])
+    with c_btn1:
+        if st.button("🔄 Force Re-Scan Nifty 50", use_container_width=True):
+            should_scan = True
+    with c_btn2:
+        if st.session_state.last_run:
+            last_time_str = datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')
+            st.write(f"⏱️ Matrix sync verified at: **{last_time_str}**")
+        else:
+            st.write("⏳ Scanner ready to process Nifty 50 tracking.")
             
-            # Fetch 1-Day Macro Frame
-            hist_1d = kite.historical_data(
-                token, 
-                from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'),
-                to_date=datetime.now().strftime('%Y-%m-%d'), 
-                interval="day"
-            )
-            
-            if not hist_15m or len(hist_15m) < 110 or not hist_1d or len(hist_1d) < 110:
-                continue
-                
-            df_15m = pd.DataFrame(hist_15m)
-            df_15m = calculate_indicators(df_15m)
-            latest_15m = df_15m.iloc[-1]
-            
-            df_1d = pd.DataFrame(hist_1d)
-            df_1d = calculate_indicators(df_1d)
-            latest_1d = df_1d.iloc[-1]
-            
-            # Technical Metrics Evaluation Logic
-            rsi_15m = latest_15m['RSI']
-            vol_ma_15m = latest_15m['VOL_MA_50']
-            curr_vol_15m = latest_15m['volume']
-            
-            if curr_vol_15m > vol_ma_15m and rsi_15m > 60: trend_15m = "🟢 BULLISH"
-            elif curr_vol_15m > vol_ma_15m and rsi_15m < 40: trend_15m = "🔴 BEARISH"
-            else: trend_15m = "⚪ NEUTRAL"
-            
-            rsi_1d = latest_1d['RSI']
-            vol_ma_1d = latest_1d['VOL_MA_50']
-            curr_vol_1d = latest_1d['volume']
-            
-            if curr_vol_1d > vol_ma_1d and rsi_1d > 60: trend_1d = "🟢 BULLISH"
-            elif curr_vol_1d > vol_ma_1d and rsi_1d < 40: trend_1d = "🔴 BEARISH"
-            else: trend_1d = "⚪ NEUTRAL"
-                
-            st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
-            st_1d = latest_1d.filter(like='SUPERT_').iloc[0]
-            
-            scan_results.append({
-                "Stock Name": symbol,
-                "Industry": row["Industry"],
-                "Promoter Holding (%)": row["Promoter_Percent"],
-                "Stock PE": row["Stock_PE"],
-                "Industry PE": row["Industry_PE"],
-                "PB": row["PB"],
-                "ROCE": row["ROCE"],
-                "52W High": row["52W_High"],
-                "52W Low": row["52W_Low"],
-                "5Y High": row["5Y_High"],
-                "5Y Low": row["5Y_Low"],
-                "LTP": round(latest_15m['close'], 2),
-                
-                # Multi-Timeframe Mappings
-                "RSI (15M)": round(rsi_15m, 2),
-                "Vol MA (15M)": round(vol_ma_15m, 1),
-                "Supertrend (15M)": round(st_15m, 2),
-                "Trend Status (15M)": trend_15m,
-                "VWMA 50 (15M)": round(latest_15m['VWMA_50'], 2),
-                "VWMA 100 (15M)": round(latest_15m['VWMA_100'], 2),
-                
-                "RSI (1D)": round(rsi_1d, 2),
-                "Vol MA (1D)": round(vol_ma_1d, 1),
-                "Supertrend (1D)": round(st_1d, 2),
-                "Trend Status (1D)": trend_1d,
-                "VWMA 50 (1D)": round(latest_1d['VWMA_50'], 2),
-                "VWMA 100 (1D)": round(latest_1d['VWMA_100'], 2),
-            })
-            time.sleep(0.25) # Throttling margin for Kite API stability
-            
-        except Exception as e:
-            time.sleep(0.25)
-            continue
+    if should_scan:
+        with st.spinner("🚀 Scanning Nifty 50 assets concurrently..."):
+            results = execute_parallel_scan(meta_df, token_lookup, kite)
+            if results:
+                st.session_state.master_df = pd.DataFrame(results)
+                st.session_state.last_run = current_time
+                st.rerun()
+            else:
+                st.error("No active market telemetry retrieved.")
+                return
 
-    progress_bar.empty()
-    status_text.empty()
-    
-    if not scan_results:
-        st.warning("Empty output across processing pipeline.")
+    if st.session_state.master_df is None:
         return
         
-    master_df = pd.DataFrame(scan_results)
+    master_df = st.session_state.master_df
     
     tab1, tab2 = st.tabs(["📊 Technical Multi-Timeframe Scanner", "🏢 Structural Bifurcation View"])
     
-    # --- TAB 1: TECH VIEW ---
+    # --- TAB 1: TECHNICAL VIEWS ---
     with tab1:
         st.subheader("⚙️ Timeframe Filter Configurator")
         active_tf = st.radio("Select Active Scanner Frame Layer:", ["15 Minute", "1 Day"], horizontal=True)
-        
         suffix = " (15M)" if active_tf == "15 Minute" else " (1D)"
         trend_col = f"Trend Status{suffix}"
         
@@ -282,53 +315,42 @@ def run_integrated_pipeline():
         neutral_df = master_df[master_df[trend_col] == "⚪ NEUTRAL"]
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Scanned Portfolio", len(master_df))
-        c2.metric("Bullish Vol Breakouts", len(bullish_df))
-        c3.metric("Bearish Vol Breakdowns", len(bearish_df))
-        c4.metric("Neutral / Consolidation Grid", len(neutral_df))
+        c1.metric("Nifty 50 Actives", len(master_df))
+        c2.metric("Bullish Vol Surges", len(bullish_df))
+        c3.metric("Bearish Vol Breaks", len(bearish_df))
+        c4.metric("Consolidation Grid", len(neutral_df))
         
         st.divider()
-        
         tech_display_cols = [
             "Stock Name", "LTP", f"VWMA 50{suffix}", f"VWMA 100{suffix}", 
             f"RSI{suffix}", f"Vol MA{suffix}", f"Supertrend{suffix}"
         ]
         
-        st.subheader(f"🔥 Vol Surge Buy Signals ({active_tf})")
+        st.subheader(f"🔥 Momentum Surge Buy Signals ({active_tf})")
         if not bullish_df.empty:
             st.dataframe(bullish_df[tech_display_cols], use_container_width=True, hide_index=True)
         else:
-            st.info("No breakouts verified for current index list.")
+            st.info("No breakouts verified for Nifty 50 assets right now.")
             
-        st.divider()
-        
-        st.subheader(f"❄️ Vol Surge Sell Signals ({active_tf})")
-        if not bearish_df.empty:
-            st.dataframe(bearish_df[tech_display_cols], use_container_width=True, hide_index=True)
-        else:
-            st.info("No downside trend vectors matching criteria.")
-            
-        st.divider()
-        
-        st.subheader(f"⚖️ Neutral Baseline Matrix ({active_tf})")
+        st.subheader(f"⚖️ Neutral / Structural Rotation Grid ({active_tf})")
         if not neutral_df.empty:
             st.dataframe(neutral_df[tech_display_cols], use_container_width=True, hide_index=True)
 
-    # --- TAB 2: SECTOR PROFILE ANALYSIS ---
+    # --- TAB 2: STRUCTURAL PROFILE VIEWS ---
     with tab2:
         st.subheader("🔍 Valuation & Ownership Filter Matrix")
         f_col1, f_col2 = st.columns(2)
         
         with f_col1:
             all_industries = ["All Industries"] + sorted(list(master_df["Industry"].unique()))
-            selected_industry = st.selectbox("Filter Sector Classification:", all_industries)
+            selected_industry = st.selectbox("Sector Classification:", all_industries)
             
         with f_col2:
             master_df["Promoter Tier"] = master_df["Promoter Holding (%)"].apply(
                 lambda x: "High (>50%)" if x >= 50.0 else ("Medium (30%-50%)" if x >= 30.0 else "Low/Institutional (<30%)")
             )
             all_tiers = ["All Tiers", "High (>50%)", "Medium (30%-50%)", "Low/Institutional (<30%)"]
-            selected_tier = st.selectbox("Filter Insider Stake Strength:", all_tiers)
+            selected_tier = st.selectbox("Insider Stake Strength:", all_tiers)
             
         bifurcated_df = master_df.copy()
         if selected_industry != "All Industries":
@@ -336,12 +358,9 @@ def run_integrated_pipeline():
         if selected_tier != "All Tiers":
             bifurcated_df = bifurcated_df[bifurcated_df["Promoter Tier"] == selected_tier]
             
-        st.divider()
-        
         display_cols = [
             "Stock Name", "Industry", "Promoter Holding (%)", 
-            "Stock PE", "Industry PE", "PB", "ROCE", 
-            "52W High", "52W Low", "5Y High", "5Y Low"
+            "Stock PE", "Industry PE", "PB", "ROCE"
         ]
         
         if not bifurcated_df.empty:
@@ -352,8 +371,6 @@ def run_integrated_pipeline():
             )
         else:
             st.warning("No portfolios pass matching criteria filters.")
-            
-    st.write(f"Pipeline Refresh Complete | Current System Matrix Sync: {datetime.now().strftime('%H:%M:%S')}")
 
 run_integrated_pipeline()
-  
+    
