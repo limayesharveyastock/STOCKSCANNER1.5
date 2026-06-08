@@ -34,11 +34,11 @@ def calculate_indicators(df):
     df['low'] = pd.to_numeric(df['low'])
     df['volume'] = pd.to_numeric(df['volume'])
     
-    # Technical Indicators
-    df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
-    df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
+    # Technical Indicators (Updated to 50 & 100 periods)
+    df['VWMA_50'] = ta.vwma(df['close'], df['volume'], length=50)
+    df['VWMA_100'] = ta.vwma(df['close'], df['volume'], length=100)
     df['RSI'] = ta.rsi(df['close'], length=14)
-    df['VOL_MA_20'] = ta.sma(df['volume'], length=20) # Added 20-period Volume Moving Average
+    df['VOL_MA_50'] = ta.sma(df['volume'], length=50) # Updated to 50-period Volume MA
     
     # Supertrend
     st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
@@ -86,8 +86,8 @@ def run_nifty_50_scanner():
                 interval="15minute"
             )
             
-            # Increased minimum length threshold to ensure Volume MA 20 populates accurately
-            if not hist or len(hist) < 30:
+            # Increased minimum length guard to 110 to accommodate the new 100-period calculation matrix
+            if not hist or len(hist) < 110:
                 continue
                 
             df = pd.DataFrame(hist)
@@ -96,12 +96,12 @@ def run_nifty_50_scanner():
             
             rsi_val = latest['RSI']
             curr_volume = latest['volume']
-            vol_ma_val = latest['VOL_MA_20']
+            vol_ma_val = latest['VOL_MA_50']
             
             if pd.isna(rsi_val) or pd.isna(vol_ma_val):
                 continue
             
-            # Trend Logic: Combines Volume Spike confirmation with RSI Momentum thresholds
+            # Trend Logic: Volume Spike confirmation with RSI Momentum thresholds
             if curr_volume > vol_ma_val and rsi_val > 60:
                 trend = "🟢 BULLISH"
             elif curr_volume > vol_ma_val and rsi_val < 40:
@@ -114,11 +114,11 @@ def run_nifty_50_scanner():
             scan_results.append({
                 "Stock Name": symbol,
                 "LTP": round(latest['close'], 2),
-                "VWMA 9": round(latest['VWMA_9'], 2),
-                "VWMA 26": round(latest['VWMA_26'], 2),
+                "VWMA 50": round(latest['VWMA_50'], 2),
+                "VWMA 100": round(latest['VWMA_100'], 2),
                 "RSI (14)": round(rsi_val, 2),
                 "Volume": int(curr_volume),
-                "Vol MA (20)": round(vol_ma_val, 1),
+                "Vol MA (50)": round(vol_ma_val, 1),
                 "Supertrend": round(supertrend_val, 2),
                 "Trend Status": trend
             })
@@ -149,7 +149,7 @@ def run_nifty_50_scanner():
         st.divider()
         
         # Data View Segments
-        st.subheader("🔥 Volume Backed Bullish Breakouts (RSI > 60 & Volume > MA)")
+        st.subheader("🔥 Volume Backed Bullish Breakouts (RSI > 60 & Volume > 50 MA)")
         if not bullish_df.empty:
             st.dataframe(bullish_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
         else:
@@ -157,7 +157,7 @@ def run_nifty_50_scanner():
             
         st.divider()
         
-        st.subheader("❄️ Volume Backed Bearish Breakdowns (RSI < 40 & Volume > MA)")
+        st.subheader("❄️ Volume Backed Bearish Breakdowns (RSI < 40 & Volume > 50 MA)")
         if not bearish_df.empty:
             st.dataframe(bearish_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
         else:
@@ -175,3 +175,4 @@ def run_nifty_50_scanner():
     st.write(f"Last data pull complete at: {datetime.now().strftime('%H:%M:%S')}")
 
 run_nifty_50_scanner()
+                         
