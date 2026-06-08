@@ -4,6 +4,7 @@ import pandas_ta as ta
 from datetime import datetime, timedelta
 import time
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from kiteconnect import KiteConnect
 
 st.set_page_config(layout="wide")
@@ -33,7 +34,6 @@ def get_instrument_lookup():
 def load_metadata():
     csv_path = "stock_metadata.csv"
     
-    # Accurate Sector/Industry Vector Mapping Layout for Nifty 200 Assets
     ticker_industries = {
         # Banking & Financial Services (BFSI)
         "AXISBANK": "Banking", "HDFCBANK": "Banking", "ICICIBANK": "Banking", "INDUSINDBK": "Banking", 
@@ -108,7 +108,6 @@ def load_metadata():
     }
     
     def generate_dynamic_fallback():
-        """Generates structured baseline dataframe using accurate sector classifications."""
         fallback_data = [{
             "Ticker": ticker,
             "Industry": ticker_industries.get(ticker, "Core Matrix"),
@@ -124,17 +123,14 @@ def load_metadata():
         } for ticker in sorted(list(ticker_industries.keys()))]
         return pd.DataFrame(fallback_data)
 
-    # 1. Attempt to resolve and read from local workspace file system
     if os.path.exists(csv_path):
         try:
             df = pd.read_csv(csv_path)
             if not df.empty and "Ticker" in df.columns:
                 return df
         except Exception:
-            # On formatting errors, fail silently and hand off to fallback engine
             pass
 
-    # 2. Trigger fallback loop if CSV parsing breaks
     return generate_dynamic_fallback()
 
 def calculate_indicators(df):
@@ -152,58 +148,63 @@ def calculate_indicators(df):
     df = pd.concat([df, st_data], axis=1)
     return df
 
-@st.fragment(run_every="900s")
-def run_integrated_pipeline():
-    meta_df = load_metadata()
-    if meta_df is None:
-        return
-        
-    kite = get_kite()
-    token_lookup = get_instrument_lookup()
-    
+# High-Performance Cache for 1-Day Macro Indicators (Refreshes once every 4 hours)
+@st.cache_data(ttl=14400)
+def get_daily_macro_data(_kite, token, symbol):
+    try:
+        hist_1d = _kite.historical_data(
+            token, 
+            from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'),
+            to_date=datetime.now().strftime('%Y-%m-%d'), 
+            interval="day"
+        )
+        if not hist_1d or len(hist_1d) < 110:
+            return None
+        df_1d = pd.DataFrame(hist_1d)
+        df_1d = calculate_indicators(df_1d)
+        latest_1d = df_1d.iloc[-1]
+        st_col = latest_1d.filter(like='SUPERT_').index[0]
+        return {
+            "RSI_1D": float(latest_1d['RSI']),
+            "VOL_MA_1D": float(latest_1d['VOL_MA_50']),
+            "VOLUME_1D": float(latest_1d['volume']),
+            "SUPERTREND_1D": float(latest_1d[st_col]),
+            "VWMA_50_1D": float(latest_1d['VWMA_50']),
+            "VWMA_100_1D": float(latest_1d['VWMA_100'])
+        }
+    except Exception:
+        return None
+
+# Threaded Scanner Execution Matrix
+def execute_parallel_scan(meta_df, token_lookup, kite):
     scan_results = []
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    total_stocks = len(meta_df)
     
-    for index, row in meta_df.iterrows():
+    def worker(row):
         symbol = str(row['Ticker']).strip()
-        status_text.text(f"Syncing Vector {index + 1}/{total_stocks}: {symbol}...")
-        progress_bar.progress((index + 1) / total_stocks)
-        
         token = token_lookup.get(symbol)
         if not token:
-            continue
-        
+            return None
         try:
-            # Fetch 15-Minute Structural Frame
+            daily_data = get_daily_macro_data(kite, token, symbol)
+            if not daily_data:
+                return None
+                
             hist_15m = kite.historical_data(
                 token, 
                 from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'),
                 to_date=datetime.now().strftime('%Y-%m-%d'), 
                 interval="15minute"
             )
-            
-            # Fetch 1-Day Macro Frame
-            hist_1d = kite.historical_data(
-                token, 
-                from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'),
-                to_date=datetime.now().strftime('%Y-%m-%d'), 
-                interval="day"
-            )
-            
-            if not hist_15m or len(hist_15m) < 110 or not hist_1d or len(hist_1d) < 110:
-                continue
+            if not hist_15m or len(hist_15m) < 110:
+                return None
                 
             df_15m = pd.DataFrame(hist_15m)
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
             
-            df_1d = pd.DataFrame(hist_1d)
-            df_1d = calculate_indicators(df_1d)
-            latest_1d = df_1d.iloc[-1]
+            # Paced worker throttling to securely respect Zerodha's 3 requests/sec boundary
+            time.sleep(0.7)
             
-            # Technical Metrics Evaluation Logic
             rsi_15m = latest_15m['RSI']
             vol_ma_15m = latest_15m['VOL_MA_50']
             curr_vol_15m = latest_15m['volume']
@@ -212,18 +213,13 @@ def run_integrated_pipeline():
             elif curr_vol_15m > vol_ma_15m and rsi_15m < 40: trend_15m = "🔴 BEARISH"
             else: trend_15m = "⚪ NEUTRAL"
             
-            rsi_1d = latest_1d['RSI']
-            vol_ma_1d = latest_1d['VOL_MA_50']
-            curr_vol_1d = latest_1d['volume']
-            
-            if curr_vol_1d > vol_ma_1d and rsi_1d > 60: trend_1d = "🟢 BULLISH"
-            elif curr_vol_1d > vol_ma_1d and rsi_1d < 40: trend_1d = "🔴 BEARISH"
+            if daily_data["VOLUME_1D"] > daily_data["VOL_MA_1D"] and daily_data["RSI_1D"] > 60: trend_1d = "🟢 BULLISH"
+            elif daily_data["VOLUME_1D"] > daily_data["VOL_MA_1D"] and daily_data["RSI_1D"] < 40: trend_1d = "🔴 BEARISH"
             else: trend_1d = "⚪ NEUTRAL"
                 
             st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
-            st_1d = latest_1d.filter(like='SUPERT_').iloc[0]
             
-            scan_results.append({
+            return {
                 "Stock Name": symbol,
                 "Industry": row["Industry"],
                 "Promoter Holding (%)": row["Promoter_Percent"],
@@ -237,7 +233,6 @@ def run_integrated_pipeline():
                 "5Y Low": row["5Y_Low"],
                 "LTP": round(latest_15m['close'], 2),
                 
-                # Multi-Timeframe Mappings
                 "RSI (15M)": round(rsi_15m, 2),
                 "Vol MA (15M)": round(vol_ma_15m, 1),
                 "Supertrend (15M)": round(st_15m, 2),
@@ -245,27 +240,75 @@ def run_integrated_pipeline():
                 "VWMA 50 (15M)": round(latest_15m['VWMA_50'], 2),
                 "VWMA 100 (15M)": round(latest_15m['VWMA_100'], 2),
                 
-                "RSI (1D)": round(rsi_1d, 2),
-                "Vol MA (1D)": round(vol_ma_1d, 1),
-                "Supertrend (1D)": round(st_1d, 2),
+                "RSI (1D)": round(daily_data["RSI_1D"], 2),
+                "Vol MA (1D)": round(daily_data["VOL_MA_1D"], 1),
+                "Supertrend (1D)": round(daily_data["SUPERTREND_1D"], 2),
                 "Trend Status (1D)": trend_1d,
-                "VWMA 50 (1D)": round(latest_1d['VWMA_50'], 2),
-                "VWMA 100 (1D)": round(latest_1d['VWMA_100'], 2),
-            })
-            time.sleep(0.25) # Throttling margin for Kite API stability
-            
-        except Exception as e:
-            time.sleep(0.25)
-            continue
+                "VWMA 50 (1D)": round(daily_data["VWMA_50_1D"], 2),
+                "VWMA 100 (1D)": round(daily_data["VWMA_100_1D"], 2),
+            }
+        except Exception:
+            return None
 
-    progress_bar.empty()
-    status_text.empty()
-    
-    if not scan_results:
-        st.warning("Empty output across processing pipeline.")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(worker, row) for _, row in meta_df.iterrows()]
+        for future in as_completed(futures):
+            res = future.result()
+            if res:
+                scan_results.append(res)
+                
+    return scan_results
+
+@st.fragment(run_every="900s")
+def run_integrated_pipeline():
+    meta_df = load_metadata()
+    if meta_df is None:
         return
         
-    master_df = pd.DataFrame(scan_results)
+    kite = get_kite()
+    token_lookup = get_instrument_lookup()
+    
+    # Initialize Memory Persistence layers
+    if "master_df" not in st.session_state:
+        st.session_state.master_df = None
+    if "last_run" not in st.session_state:
+        st.session_state.last_run = None
+        
+    current_time = time.time()
+    should_scan = False
+    
+    if st.session_state.master_df is None:
+        should_scan = True
+    elif st.session_state.last_run is not None and (current_time - st.session_state.last_run) >= 900:
+        should_scan = True
+        
+    # Top Level Control Grid
+    c_btn1, c_btn2 = st.columns([1, 4])
+    with c_btn1:
+        if st.button("🔄 Force Re-Scan Market", use_container_width=True):
+            should_scan = True
+    with c_btn2:
+        if st.session_state.last_run:
+            last_time_str = datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')
+            st.write(f"⏱️ Last fully synchronized: **{last_time_str}** (Auto-refreshes in background every 15m)")
+        else:
+            st.write("⏳ Scanner not initialized. Click to run first boot matrix setup.")
+            
+    if should_scan:
+        with st.spinner("🚀 ThreadPool Matrix active: scanning Nifty 200 assets concurrently..."):
+            results = execute_parallel_scan(meta_df, token_lookup, kite)
+            if results:
+                st.session_state.master_df = pd.DataFrame(results)
+                st.session_state.last_run = current_time
+                st.rerun()
+            else:
+                st.error("No active market telemetry retrieved.")
+                return
+
+    if st.session_state.master_df is None:
+        return
+        
+    master_df = st.session_state.master_df
     
     tab1, tab2 = st.tabs(["📊 Technical Multi-Timeframe Scanner", "🏢 Structural Bifurcation View"])
     
@@ -352,7 +395,6 @@ def run_integrated_pipeline():
             )
         else:
             st.warning("No portfolios pass matching criteria filters.")
-            
-    st.write(f"Pipeline Refresh Complete | Current System Matrix Sync: {datetime.now().strftime('%H:%M:%S')}")
 
 run_integrated_pipeline()
+        
