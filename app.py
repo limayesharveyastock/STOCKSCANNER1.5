@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 st.title("Technical Indicator Scanner")
 
-# Initialize Kite connection
 @st.cache_resource
 def get_kite():
     api_key = st.secrets["api_key"]
@@ -20,9 +19,14 @@ def calculate_indicators(df):
     df['high'] = pd.to_numeric(df['high'])
     df['low'] = pd.to_numeric(df['low'])
     
-    df['EMA_20'] = ta.ema(df['close'], length=20)
+    # EMA 9 and 26
+    df['EMA_9'] = ta.ema(df['close'], length=9)
+    df['EMA_26'] = ta.ema(df['close'], length=26)
+    
+    # RSI 14
     df['RSI'] = ta.rsi(df['close'], length=14)
     
+    # Supertrend
     st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
     df = pd.concat([df, st_data], axis=1)
     return df
@@ -30,12 +34,10 @@ def calculate_indicators(df):
 @st.fragment(run_every="60s")
 def display_indicators():
     kite = get_kite()
-    
-    # Store stock name and token together
     stocks = {"RELIANCE": "738561"} 
     
     for name, token in stocks.items():
-        st.subheader(f"📊 Stock: {name}") # This shows the Stock Name
+        st.subheader(f"📊 Stock: {name}")
         
         try:
             hist = kite.historical_data(
@@ -48,15 +50,19 @@ def display_indicators():
             df = calculate_indicators(df)
             latest = df.iloc[-1]
             
+            # Logic for Trend
+            trend = "🟢 BULLISH" if latest['EMA_9'] > latest['EMA_26'] else "🔴 BEARISH"
+            
             # Display Metrics
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             col1.metric("Price", f"₹{latest['close']:.2f}")
-            col2.metric("EMA (20)", f"{latest['EMA_20']:.2f}")
-            col3.metric("RSI (14)", f"{latest['RSI']:.2f}")
+            col2.metric("EMA 9/26", f"{latest['EMA_9']:.0f}/{latest['EMA_26']:.0f}")
+            col3.metric("RSI", f"{latest['RSI']:.2f}")
+            col4.metric("Trend", trend)
             
             supertrend_val = latest.filter(like='SUPERT_').iloc[0]
             st.write(f"**Supertrend Value:** {supertrend_val:.2f}")
-            st.divider() # Line separator for each stock
+            st.divider()
             
         except Exception as e:
             st.error(f"Error fetching {name}: {e}")
