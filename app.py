@@ -387,4 +387,6 @@ def run_integrated_pipeline():
         else:
             st.warning("No portfolios pass matching criteria filters.")
 
-run_integrated_pipeline
+# --- SCRIPT ENTRY POINT ---
+if __name__ == "__main__":
+    run_integrated_pipeline()
