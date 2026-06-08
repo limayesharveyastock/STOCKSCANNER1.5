@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import pandas_ta as ta
-from kiteconnect import KiteConnect
 from datetime import datetime, timedelta
 import time
 
@@ -21,9 +20,9 @@ def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
     df['high'] = pd.to_numeric(df['high'])
     df['low'] = pd.to_numeric(df['low'])
-    df['volume'] = pd.to_numeric(df['volume']) # Crucial step for VWMA calculation
+    df['volume'] = pd.to_numeric(df['volume'])
     
-    # Technical Indicators (Substituted EMA with VWMA)
+    # Technical Indicators (Retaining VWMA 9/26 for reference matrix)
     df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
     df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
     df['RSI'] = ta.rsi(df['close'], length=14)
@@ -67,108 +66,5 @@ def run_nifty_50_scanner():
         "BAJAJFINSV": "4265217",
         "ADANIENT": "1118465",
         "ADANIPORTS": "3861249",
-        "JIOFIN": "615553",
-        "TATA CONSUMER": "878593"
-    }
+        "JIOFIN": "6
     
-    scan_results = []
-    
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    total_stocks = len(nifty_50_stocks)
-    
-    for index, (name, token) in enumerate(nifty_50_stocks.items()):
-        status_text.text(f"Scanning {index + 1}/{total_stocks}: {name}...")
-        progress_bar.progress((index + 1) / total_stocks)
-        
-        try:
-            hist = kite.historical_data(
-                token, 
-                from_date=(datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d'),
-                to_date=datetime.now().strftime('%Y-%m-%d'), 
-                interval="15minute"
-            )
-            
-            if not hist:
-                continue
-                
-            df = pd.DataFrame(hist)
-            df = calculate_indicators(df)
-            latest = df.iloc[-1]
-            
-            # Trend Logic: Conditioned on Price relative to VWMA 9
-            trend = "🟢 BULLISH" if latest['close'] > latest['VWMA_9'] else "🔴 BEARISH"
-            supertrend_val = latest.filter(like='SUPERT_').iloc[0]
-            
-            scan_results.append({
-                "Stock Name": name,
-                "LTP": round(latest['close'], 2),
-                "VWMA 9": round(latest['VWMA_9'], 2),
-                "VWMA 26": round(latest['VWMA_26'], 2),
-                "RSI (14)": round(latest['RSI'], 2),
-                "Supertrend": round(supertrend_val, 2),
-                "Trend Status": trend
-            })
-            
-            time.sleep(0.35)
-            
-        except Exception as e:
-            time.sleep(0.35)
-            continue
-
-    progress_bar.empty()
-    status_text.empty()
-    
-    if scan_results:
-        results_df = pd.DataFrame(scan_results)
-        
-        # Split into DataFrames based on your Price vs VWMA rule
-        bullish_df = results_df[results_df["Trend Status"] == "🟢 BULLISH"]
-        bearish_df = results_df[results_df["Trend Status"] == "🔴 BEARISH"]
-        
-        # High-level summary metrics
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Scanned", len(results_df))
-        c2.metric("Price Above VWMA (Bullish)", len(bullish_df))
-        c3.metric("Price Below VWMA (Bearish)", len(bearish_df))
-        
-        st.divider()
-        
-        # Section 1: Price Above VWMA
-        st.subheader("📈 Stocks with Price Above VWMA (Bullish Trend)")
-        if not bullish_df.empty:
-            st.dataframe(
-                bullish_df.drop(columns=["Trend Status"]), 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "RSI (14)": st.column_config.NumberColumn("RSI (14)", format="%.2f"),
-                    "LTP": st.column_config.NumberColumn("Price (₹)", format="%.2f")
-                }
-            )
-        else:
-            st.info("No stocks currently have a price above their VWMA.")
-            
-        st.divider()
-        
-        # Section 2: Price Below VWMA
-        st.subheader("📉 Stocks with Price Below VWMA (Bearish Trend)")
-        if not bearish_df.empty:
-            st.dataframe(
-                bearish_df.drop(columns=["Trend Status"]), 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "RSI (14)": st.column_config.NumberColumn("RSI (14)", format="%.2f"),
-                    "LTP": st.column_config.NumberColumn("Price (₹)", format="%.2f")
-                }
-            )
-        else:
-            st.info("No stocks currently have a price below their VWMA.")
-            
-    else:
-        st.warning("No data retrieved during scan.")
-        
-    st.write(f"Last data pull complete at: {datetime.now().strftime('%H:%M:%S')}")
-
-run_nifty_50_scanner()
