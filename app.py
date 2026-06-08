@@ -45,6 +45,7 @@ st.markdown("""
 # --- INITIALIZATION ---
 @st.cache_resource
 def get_kite():
+    # Ensure your Streamlit secrets are configured
     api_key = st.secrets["api_key"]
     access_token = st.secrets["access_token"]
     kite = KiteConnect(api_key=api_key, timeout=15)
@@ -113,7 +114,6 @@ def scan_stock(symbol, token, kite):
         p, r1, s1 = calculate_session_pivots(df_1d)
         
         # Structural Signal Generation
-        # VWMA 9/26 Crossover + Pivot Proximity
         signal = "NEUTRAL"
         if latest['close'] > latest['VWMA_9'] and latest['close'] > p: signal = "BUY"
         elif latest['close'] < latest['VWMA_9'] and latest['close'] < p: signal = "SELL"
@@ -122,7 +122,8 @@ def scan_stock(symbol, token, kite):
             "Stock": symbol, "LTP": latest['close'], "Signal": signal, 
             "RSI": round(latest['RSI'], 2), "Pivot": p, "R1": r1, "S1": s1
         }
-    except: return None
+    except Exception as e: 
+        return None
 
 # --- MAIN DASHBOARD ---
 def main():
@@ -151,14 +152,13 @@ def main():
         st.session_state.df = pd.DataFrame(results)
 
     if "df" in st.session_state:
-        # Define Styling Function for Grid
+        # Define Styling Function for Grid (CORRECTED .map usage)
         def apply_styling(df):
-            # Styling Signal Column Green/Red
             def color_signal(val):
                 return 'color: green' if val == 'BUY' else 'color: red' if val == 'SELL' else 'color: black'
             
-            # Applying styling
-            return df.style.applymap(color_signal, subset=['Signal'])
+            # Using .map instead of .applymap for modern Pandas compatibility
+            return df.style.map(color_signal, subset=['Signal'])
 
         st.subheader("TECHNICAL STRUCTURAL MATRIX")
         st.dataframe(
