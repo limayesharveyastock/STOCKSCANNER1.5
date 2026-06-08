@@ -38,7 +38,7 @@ def calculate_indicators(df):
     df['VWMA_50'] = ta.vwma(df['close'], df['volume'], length=50)
     df['VWMA_100'] = ta.vwma(df['close'], df['volume'], length=100)
     df['RSI'] = ta.rsi(df['close'], length=14)
-    df['VOL_MA_50'] = ta.sma(df['volume'], length=50) # Updated to 50-period Volume MA
+    df['VOL_MA_100'] = ta.sma(df['volume'], length=100) # Updated to 50-period Volume MA
     
     # Supertrend
     st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
@@ -96,7 +96,7 @@ def run_nifty_50_scanner():
             
             rsi_val = latest['RSI']
             curr_volume = latest['volume']
-            vol_ma_val = latest['VOL_MA_50']
+            vol_ma_val = latest['VOL_MA_100']
             
             if pd.isna(rsi_val) or pd.isna(vol_ma_val):
                 continue
@@ -118,7 +118,7 @@ def run_nifty_50_scanner():
                 "VWMA 100": round(latest['VWMA_100'], 2),
                 "RSI (14)": round(rsi_val, 2),
                 "Volume": int(curr_volume),
-                "Vol MA (50)": round(vol_ma_val, 1),
+                "Vol MA (100)": round(vol_ma_val, 1),
                 "Supertrend": round(supertrend_val, 2),
                 "Trend Status": trend
             })
@@ -149,7 +149,7 @@ def run_nifty_50_scanner():
         st.divider()
         
         # Data View Segments
-        st.subheader("🔥 Volume Backed Bullish Breakouts (RSI > 60 & Volume > 50 MA)")
+        st.subheader("🔥 Volume Backed Bullish Breakouts (RSI > 60 & Volume > 100 MA)")
         if not bullish_df.empty:
             st.dataframe(bullish_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
         else:
@@ -157,7 +157,7 @@ def run_nifty_50_scanner():
             
         st.divider()
         
-        st.subheader("❄️ Volume Backed Bearish Breakdowns (RSI < 40 & Volume > 50 MA)")
+        st.subheader("❄️ Volume Backed Bearish Breakdowns (RSI < 40 & Volume > 100 MA)")
         if not bearish_df.empty:
             st.dataframe(bearish_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
         else:
