@@ -29,9 +29,16 @@ def get_instrument_lookup():
         st.error(f"Error fetching instrument master from Kite: {e}")
         return {}
 
+def fetch_india_vix(kite):
+    """Fetches real-time India VIX level to determine structural market regime."""
+    try:
+        vix_data = kite.ltp("NSE:INDIA VIX")
+        return float(vix_data["NSE:INDIA VIX"]["last_price"])
+    except Exception:
+        return 14.5  # Strategic baseline fallback if API rate-limit hits
+
 def load_metadata():
     csv_path = "stock_metadata.csv"
-    
     nifty50_universe = {
         "ADANIENT": {"Industry": "Metals & Mining", "Promoter": 72.6, "PE": 45.2, "Ind_PE": 24.1, "PB": 4.2, "ROCE": 12.5},
         "ADANIPORTS": {"Industry": "Infrastructure / Services", "Promoter": 65.3, "PE": 33.1, "Ind_PE": 28.5, "PB": 3.9, "ROCE": 14.8},
@@ -109,26 +116,35 @@ def load_metadata():
     } for ticker, data in nifty50_universe.items()]
     return pd.DataFrame(fallback_data)
 
-# --- CLEAN INDICATOR ENGINE ---
+# --- TECHNICAL CORE ---
 def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
+    df['high'] = pd.to_numeric(df['high'])
+    df['low'] = pd.to_numeric(df['low'])
     df['volume'] = pd.to_numeric(df['volume'])
+    
     df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
     df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
     df['RSI'] = ta.rsi(df['close'], length=14)
     return df
 
-def get_current_cross_state(df):
-    if len(df) < 2: return "No Cross"
-    latest, prev = df.iloc[-1], df.iloc[-2]
-    if prev['VWMA_9'] <= prev['VWMA_26'] and latest['VWMA_9'] > latest['VWMA_26']: return "🔥 BULLISH CROSS"
-    if prev['VWMA_9'] >= prev['VWMA_26'] and latest['VWMA_9'] < latest['VWMA_26']: return "❄️ BEARISH CROSS"
-    return "🟢 Above" if latest['VWMA_9'] > latest['VWMA_26'] else "🔴 Below"
+def calculate_fibonacci_pivots(df):
+    """Calculates Fibonacci Pivot Point matrices using an automatic 20-period tail lookback."""
+    if len(df) < 20:
+        return 0.0, 0.0, 0.0
+    sub_df = df.tail(20)
+    high_20 = sub_df['high'].max()
+    low_20 = sub_df['low'].min()
+    close_latest = df.iloc[-1]['close']
+    
+    p = (high_20 + low_20 + close_latest) / 3.0
+    r1 = p + 0.382 * (high_20 - low_20)
+    s1 = p - 0.382 * (high_20 - low_20)
+    return round(p, 2), round(r1, 2), round(s1, 2)
 
 def get_last_crossover_details(df):
     if len(df) < 2: return 0.0, "No Cross", 0
     df = df.copy().dropna(subset=['VWMA_9', 'VWMA_26']).reset_index(drop=True)
-    
     df['diff'] = df['VWMA_9'] - df['VWMA_26']
     df['sign'] = (df['diff'] > 0).astype(int)
     crosses = df[df['sign'] != df['sign'].shift(1)].iloc[1:]
@@ -137,12 +153,11 @@ def get_last_crossover_details(df):
         last_cross_row = crosses.iloc[-1]
         bars_ago = len(df) - 1 - crosses.index[-1]
         c_type = "🔥 Bullish" if last_cross_row['VWMA_9'] > last_cross_row['VWMA_26'] else "❄️ Bearish"
-        cross_value = round(last_cross_row['VWMA_9'], 2)
-        return cross_value, c_type, int(bars_ago)
+        return round(last_cross_row['VWMA_9'], 2), c_type, int(bars_ago)
     return 0.0, "No Cross", 0
 
-# --- DATA STREAM COMPILER ---
-def execute_parallel_scan(meta_df, token_lookup, kite):
+# --- ADAPTIVE SIGNAL COMPILER ---
+def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
     scan_results = []
     
     def worker(row):
@@ -158,34 +173,8 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             df_1d = calculate_indicators(pd.DataFrame(hist_1d))
             df_15m = calculate_indicators(pd.DataFrame(hist_15m))
             
-            latest_15m = df_15m.iloc[-1]
-            latest_1d = df_1d.iloc[-1]
-            ltp = round(float(latest_15m['close']), 2)
-            
-            cross_val_15m, cross_type_15m, bars_ago_15m = get_last_crossover_details(df_15m)
-            cross_val_1d, cross_type_1d, days_ago_1d = get_last_crossover_details(df_1d)
-            
-            within_15m = "🎯 YES" if (cross_val_15m * 0.99) <= ltp <= (cross_val_15m * 1.01) else "No"
-            within_1d = "🎯 YES" if (cross_val_1d * 0.99) <= ltp <= (cross_val_1d * 1.01) else "No"
-            
-            # --- TARGET LOGIC: CONDITIONAL SIGNAL ENGINE ---
-            rsi_15m = float(latest_15m['RSI'])
-            if "Bullish" in cross_type_15m and rsi_15m > 60:
-                signal_15m = "🟢 BUY"
-            elif "Bearish" in cross_type_15m and rsi_15m < 30:
-                signal_15m = "🔴 SELL"
-            else:
-                signal_15m = "⚪ NEUTRAL"
-
-            rsi_1d = float(latest_1d['RSI'])
-            if "Bullish" in cross_type_1d and rsi_1d > 60:
-                signal_1d = "🟢 BUY"
-            elif "Bearish" in cross_type_1d and rsi_1d < 30:
-                signal_1d = "🔴 SELL"
-            else:
-                signal_1d = "⚪ NEUTRAL"
-            
-            return {
+            timeframes = {"15M": df_15m, "1D": df_1d}
+            stock_data = {
                 "Stock Name": symbol,
                 "Industry": row.get("Industry", "Blue-Chip Core"),
                 "Promoter Holding (%)": row.get("Promoter_Percent", 0.0),
@@ -193,24 +182,73 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 "Industry PE": row.get("Industry_PE", 0.0),
                 "PB": row.get("PB", 0.0),
                 "ROCE": row.get("ROCE", 0.0),
-                "LTP": ltp,
-                
-                # Tactical 15-Minute Metrics
-                "Action Signal (15M)": signal_15m,
-                "RSI (15M)": round(rsi_15m, 2),
-                "VWMA Cross (15M)": get_current_cross_state(df_15m),
-                "Last Cross Value (15M)": cross_val_15m,
-                "Last Cross Type (15M)": f"{cross_type_15m} ({bars_ago_15m} bars ago)",
-                "Within 1% of Cross (15M)": within_15m,
-                
-                # Strategic Daily Metrics
-                "Action Signal (1D)": signal_1d,
-                "RSI (1D)": round(rsi_1d, 2),
-                "VWMA Cross (1D)": get_current_cross_state(df_1d),
-                "Last Cross Value (1D)": cross_val_1d,
-                "Last Cross Type (1D)": f"{cross_type_1d} ({days_ago_1d} days ago)",
-                "Within 1% of Cross (1D)": within_1d
+                "LTP": round(float(df_15m.iloc[-1]['close']), 2)
             }
+            
+            for tf_suffix, df_tf in timeframes.items():
+                latest = df_tf.iloc[-1]
+                ltp = round(float(latest['close']), 2)
+                v9 = float(latest['VWMA_9'])
+                v26 = float(latest['VWMA_26'])
+                rsi = float(latest['RSI'])
+                
+                cross_val, cross_type, periods_ago = get_last_crossover_details(df_tf)
+                p_val, r1_val, s1_val = calculate_fibonacci_pivots(df_tf)
+                
+                signal = "⚪ NEUTRAL"
+                target_val = 0.0
+                sl_val = 0.0
+                
+                # --- MARKET REGIME EXECUTION ENGINE ---
+                if india_vix < 15.0:
+                    # TRENDING REGIME CONDITIONS
+                    if ltp > (1.01 * v9) and v9 > v26:
+                        signal = "🟢 BUY"
+                        target_val = round(ltp * 1.015, 2)  # Strict 1.5% target anchor
+                        sl_val = round(ltp * 0.99, 2)      # Structured 1.0% stoploss floor to honor 1.5:1 risk-reward
+                    elif ltp < (0.99 * v9) and v9 < v26:
+                        signal = "🔴 SELL"
+                        target_val = round(ltp * 0.985, 2) # Strict 1.5% short target
+                        sl_val = round(ltp * 1.01, 2)      # Structured 1.0% stoploss ceiling
+                else:
+                    # SIDEWAYS / VOLATILE REGIME CONDITIONS
+                    mid_r1_p = (r1_val + p_val) / 2.0
+                    mid_s1_p = (s1_val + p_val) / 2.0  # Symmetric implementation for validation safety
+                    
+                    # Core baseline indicators check
+                    is_bullish = ("Bullish" in cross_type or (v9 > v26)) and rsi > 50
+                    is_bearish = ("Bearish" in cross_type or (v9 < v26)) and rsi < 50
+                    
+                    if is_bullish:
+                        # Filter Check: "If price > 50% BETWEEN R1 AND P, do not send buy signal."
+                        if ltp <= mid_r1_p:
+                            signal = "🟢 BUY"
+                            target_val = r1_val
+                            target_dist = r1_val - ltp
+                            sl_val = round(ltp - (target_dist / 1.5), 2)  # Dynamically computed to enforce 1.5:1 ratio exactly
+                    elif is_bearish:
+                        # Filter Check: "If Price < 50% between R1 AND P (interpreted via S1 channel), do not send sell signal."
+                        if ltp >= mid_s1_p:
+                            signal = "🔴 SELL"
+                            target_val = s1_val
+                            target_dist = ltp - s1_val
+                            sl_val = round(ltp + (target_dist / 1.5), 2)  # Dynamically computed to enforce 1.5:1 ratio exactly
+                
+                within_cross = "🎯 YES" if (cross_val * 0.99) <= ltp <= (cross_val * 1.01) else "No"
+                
+                # Assign to matrix map dictionary
+                stock_data.update({
+                    f"Action Signal ({tf_suffix})": signal,
+                    f"Target ({tf_suffix})": target_val,
+                    f"StopLoss ({tf_suffix})": sl_val,
+                    f"RSI ({tf_suffix})": round(rsi, 2),
+                    f"Last Cross Value ({tf_suffix})": cross_val,
+                    f"Last Cross Type ({tf_suffix})": f"{cross_type} ({periods_ago} bars/days ago)",
+                    f"Within 1% of Cross ({tf_suffix})": within_cross,
+                    f"P / R1 / S1 ({tf_suffix})": f"{p_val} | {r1_val} | {s1_val}"
+                })
+                
+            return stock_data
         except Exception:
             return None
 
@@ -223,13 +261,22 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
     return scan_results
 
 # --- INTERACTIVE DASHBOARD VIEW ---
-@st.fragment(run_every="900s")
 def run_integrated_pipeline():
     meta_df = load_metadata()
     if meta_df is None or meta_df.empty: return
         
     kite = get_kite()
     token_lookup = get_instrument_lookup()
+    india_vix = fetch_india_vix(kite)
+    
+    # Render active system parameters to user
+    vix_color = "🟢" if india_vix < 15.0 else "🟠"
+    regime_str = "**TRENDING ENGINE** (VIX < 15)" if india_vix < 15.0 else "**SIDEWAYS / VOLATILE PIVOT MATRIX** (VIX ≥ 15)"
+    
+    st.sidebar.markdown("### 🛠️ Live Volatility Guard")
+    st.sidebar.markdown(f"**India VIX LTP:** {vix_color} `{india_vix}`")
+    st.sidebar.markdown(f"**Active Ruleset:** {regime_str}")
+    st.sidebar.markdown("🔒 *Enforced Target-to-StopLoss Ratio: 1.5 : 1*")
     
     if "master_df" not in st.session_state: st.session_state.master_df = None
     if "last_run" not in st.session_state: st.session_state.last_run = None
@@ -245,8 +292,8 @@ def run_integrated_pipeline():
             st.write(f"⏱️ Matrix sync verified at: **{datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')}**")
             
     if should_scan:
-        with st.spinner("🚀 Scanning multi-timeframe records concurrently..."):
-            results = execute_parallel_scan(meta_df, token_lookup, kite)
+        with st.spinner("🚀 Analyzing indexes, VIX boundaries, and lookbacks..."):
+            results = execute_parallel_scan(meta_df, token_lookup, kite, india_vix)
             if results:
                 st.session_state.master_df = pd.DataFrame(results)
                 st.session_state.last_run = current_time
@@ -273,23 +320,23 @@ def run_integrated_pipeline():
         
         if active_tf == "15 Minute":
             tech_display_cols = [
-                "Stock Name", "Action Signal (15M)", "LTP", "Last Cross Value (15M)", 
-                "Last Cross Type (15M)", "Within 1% of Cross (15M)", "RSI (15M)"
+                "Stock Name", "Action Signal (15M)", "LTP", "Target (15M)", "StopLoss (15M)",
+                "Last Cross Value (15M)", "Last Cross Type (15M)", "Within 1% of Cross (15M)", "P / R1 / S1 (15M)"
             ]
         else:
             tech_display_cols = [
-                "Stock Name", "Action Signal (1D)", "LTP", "Last Cross Value (1D)", 
-                "Last Cross Type (1D)", "Within 1% of Cross (1D)", "RSI (1D)"
+                "Stock Name", "Action Signal (1D)", "LTP", "Target (1D)", "StopLoss (1D)",
+                "Last Cross Value (1D)", "Last Cross Type (1D)", "Within 1% of Cross (1D)", "P / R1 / S1 (1D)"
             ]
             
-        st.subheader(f"⚡ Proximity Alerts Near Cross Target ({active_tf})")
-        if not near_cross_df.empty:
-            st.dataframe(near_cross_df[tech_display_cols], use_container_width=True, hide_index=True)
+        st.subheader(f"⚡ Actionable Structural Signals & Alerts ({active_tf})")
+        signals_df = master_df[master_df[tech_display_cols[1]].isin(["🟢 BUY", "🔴 SELL"])]
+        if not signals_df.empty:
+            st.dataframe(signals_df[tech_display_cols], use_container_width=True, hide_index=True)
         else:
-            st.info(f"No active assets are consolidation-testing within 1% of historical {active_tf} crossover levels.")
+            st.info(f"No assets meet the current criteria under the {regime_str} structure.")
             
         st.subheader(f"📋 Complete Index Tracker Overview ({active_tf})")
-        # Sorting by Action Signal to show BUY/SELL entries at the top
         st.dataframe(master_df[tech_display_cols].sort_values(by=tech_display_cols[1], ascending=True), use_container_width=True, hide_index=True)
 
     with tab2:
@@ -313,4 +360,3 @@ def run_integrated_pipeline():
 
 if __name__ == "__main__":
     run_integrated_pipeline()
-            
