@@ -106,14 +106,15 @@ def load_metadata():
                     "P/B": "PB"
                 }
                 df = df.rename(columns=rename_map)
-                # Keep only rows that exist in our target Nifty 50 dictionary
                 df = df[df["Ticker"].isin(nifty50_universe.keys())]
-                st.sidebar.success(f"✅ Connected to stock_metadata.csv ({len(df)} Nifty 50 matches mapped)")
+                
+                # Inline fragment safe signaling
+                st.success(f"✅ Connected to stock_metadata.csv ({len(df)} Nifty 50 matches mapped)")
                 return df
         except Exception as e:
-            st.sidebar.error(f"⚠️ CSV parsing error: {e}")
+            st.error(f"⚠️ CSV parsing error: {e}")
 
-    st.sidebar.warning("⚠️ Using Nifty 50 in-memory baseline. (CSV not found/empty).")
+    st.warning("⚠️ Using Nifty 50 in-memory baseline. (CSV not found/empty).")
     fallback_data = [{
         "Ticker": ticker,
         "Industry": data["Industry"],
@@ -196,7 +197,7 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
             
-            time.sleep(0.5)  # Safe spacing for concurrent execution
+            time.sleep(0.5) 
             
             rsi_15m = latest_15m['RSI']
             vol_ma_15m = latest_15m['VOL_MA_50']
@@ -254,6 +255,7 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
 
 @st.fragment(run_every="900s")
 def run_integrated_pipeline():
+    # Alerts render cleanly inside the main flow matrix here
     meta_df = load_metadata()
     if meta_df is None:
         return
@@ -373,4 +375,4 @@ def run_integrated_pipeline():
             st.warning("No portfolios pass matching criteria filters.")
 
 run_integrated_pipeline()
-    
+                
