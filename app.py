@@ -30,12 +30,12 @@ def get_instrument_lookup():
         return {}
 
 def fetch_india_vix(kite):
-    """Fetches real-time India VIX level to determine structural market regime."""
+    """Fetches live India VIX level to determine active structural regime."""
     try:
         vix_data = kite.ltp("NSE:INDIA VIX")
         return float(vix_data["NSE:INDIA VIX"]["last_price"])
     except Exception:
-        return 14.5  # Strategic baseline fallback if API rate-limit hits
+        return 14.5  # Strategic baseline fallback if API throttling occurs
 
 def load_metadata():
     csv_path = "stock_metadata.csv"
@@ -116,7 +116,7 @@ def load_metadata():
     } for ticker, data in nifty50_universe.items()]
     return pd.DataFrame(fallback_data)
 
-# --- TECHNICAL CORE ---
+# --- TECHNICAL METRICS ENGINE ---
 def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
     df['high'] = pd.to_numeric(df['high'])
@@ -128,18 +128,20 @@ def calculate_indicators(df):
     df['RSI'] = ta.rsi(df['close'], length=14)
     return df
 
-def calculate_fibonacci_pivots(df):
-    """Calculates Fibonacci Pivot Point matrices using an automatic 20-period tail lookback."""
-    if len(df) < 20:
+def calculate_session_pivots(df_1d):
+    """Calculates true Fibonacci Pivots using previous day session metrics to match Zerodha Kite charts exactly."""
+    if len(df_1d) < 2:
         return 0.0, 0.0, 0.0
-    sub_df = df.tail(20)
-    high_20 = sub_df['high'].max()
-    low_20 = sub_df['low'].min()
-    close_latest = df.iloc[-1]['close']
     
-    p = (high_20 + low_20 + close_latest) / 3.0
-    r1 = p + 0.382 * (high_20 - low_20)
-    s1 = p - 0.382 * (high_20 - low_20)
+    # Extract the last fully completed daily session candle
+    prev_day = df_1d.iloc[-2]
+    high_val = float(prev_day['high'])
+    low_val = float(prev_day['low'])
+    close_val = float(prev_day['close'])
+    
+    p = (high_val + low_val + close_val) / 3.0
+    r1 = p + 0.382 * (high_val - low_val)
+    s1 = p - 0.382 * (high_val - low_val)
     return round(p, 2), round(r1, 2), round(s1, 2)
 
 def get_last_crossover_details(df):
@@ -156,7 +158,7 @@ def get_last_crossover_details(df):
         return round(last_cross_row['VWMA_9'], 2), c_type, int(bars_ago)
     return 0.0, "No Cross", 0
 
-# --- ADAPTIVE SIGNAL COMPILER ---
+# --- DATA COMPILER ---
 def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
     scan_results = []
     
@@ -172,6 +174,9 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
             
             df_1d = calculate_indicators(pd.DataFrame(hist_1d))
             df_15m = calculate_indicators(pd.DataFrame(hist_15m))
+            
+            # Anchor calculations from standard previous daily session to match Kite
+            p_val, r1_val, s1_val = calculate_session_pivots(df_1d)
             
             timeframes = {"15M": df_15m, "1D": df_1d}
             stock_data = {
@@ -193,7 +198,6 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 rsi = float(latest['RSI'])
                 
                 cross_val, cross_type, periods_ago = get_last_crossover_details(df_tf)
-                p_val, r1_val, s1_val = calculate_fibonacci_pivots(df_tf)
                 
                 signal = "⚪ NEUTRAL"
                 target_val = 0.0
@@ -201,49 +205,47 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 
                 # --- MARKET REGIME EXECUTION ENGINE ---
                 if india_vix < 15.0:
-                    # TRENDING REGIME CONDITIONS
+                    # TRENDING CONDITIONS
                     if ltp > (1.01 * v9) and v9 > v26:
                         signal = "🟢 BUY"
-                        target_val = round(ltp * 1.015, 2)  # Strict 1.5% target anchor
-                        sl_val = round(ltp * 0.99, 2)      # Structured 1.0% stoploss floor to honor 1.5:1 risk-reward
+                        target_val = round(ltp * 1.015, 2)
+                        sl_val = round(ltp * 0.99, 2)      # Maining strict 1.5:1 ratio layout
                     elif ltp < (0.99 * v9) and v9 < v26:
                         signal = "🔴 SELL"
-                        target_val = round(ltp * 0.985, 2) # Strict 1.5% short target
-                        sl_val = round(ltp * 1.01, 2)      # Structured 1.0% stoploss ceiling
+                        target_val = round(ltp * 0.985, 2)
+                        sl_val = round(ltp * 1.01, 2)
                 else:
-                    # SIDEWAYS / VOLATILE REGIME CONDITIONS
+                    # SIDEWAYS / VOLATILE CONDITIONS (Pivots Match Kite Indicators)
                     mid_r1_p = (r1_val + p_val) / 2.0
-                    mid_s1_p = (s1_val + p_val) / 2.0  # Symmetric implementation for validation safety
+                    mid_s1_p = (s1_val + p_val) / 2.0
                     
-                    # Core baseline indicators check
                     is_bullish = ("Bullish" in cross_type or (v9 > v26)) and rsi > 50
                     is_bearish = ("Bearish" in cross_type or (v9 < v26)) and rsi < 50
                     
                     if is_bullish:
-                        # Filter Check: "If price > 50% BETWEEN R1 AND P, do not send buy signal."
+                        # Structural Filter Check: Price cannot be more than 50% between P and R1
                         if ltp <= mid_r1_p:
                             signal = "🟢 BUY"
                             target_val = r1_val
                             target_dist = r1_val - ltp
-                            sl_val = round(ltp - (target_dist / 1.5), 2)  # Dynamically computed to enforce 1.5:1 ratio exactly
+                            sl_val = round(ltp - (target_dist / 1.5), 2)  # Extrapolates 1.5:1 Risk-Reward Floor
                     elif is_bearish:
-                        # Filter Check: "If Price < 50% between R1 AND P (interpreted via S1 channel), do not send sell signal."
+                        # Structural Filter Check: Price cannot be lower than 50% between P and S1
                         if ltp >= mid_s1_p:
                             signal = "🔴 SELL"
                             target_val = s1_val
                             target_dist = ltp - s1_val
-                            sl_val = round(ltp + (target_dist / 1.5), 2)  # Dynamically computed to enforce 1.5:1 ratio exactly
+                            sl_val = round(ltp + (target_dist / 1.5), 2)  # Extrapolates 1.5:1 Risk-Reward Ceiling
                 
                 within_cross = "🎯 YES" if (cross_val * 0.99) <= ltp <= (cross_val * 1.01) else "No"
                 
-                # Assign to matrix map dictionary
                 stock_data.update({
                     f"Action Signal ({tf_suffix})": signal,
                     f"Target ({tf_suffix})": target_val,
                     f"StopLoss ({tf_suffix})": sl_val,
                     f"RSI ({tf_suffix})": round(rsi, 2),
                     f"Last Cross Value ({tf_suffix})": cross_val,
-                    f"Last Cross Type ({tf_suffix})": f"{cross_type} ({periods_ago} bars/days ago)",
+                    f"Last Cross Type ({tf_suffix})": f"{cross_type} ({periods_ago} periods ago)",
                     f"Within 1% of Cross ({tf_suffix})": within_cross,
                     f"P / R1 / S1 ({tf_suffix})": f"{p_val} | {r1_val} | {s1_val}"
                 })
@@ -269,9 +271,8 @@ def run_integrated_pipeline():
     token_lookup = get_instrument_lookup()
     india_vix = fetch_india_vix(kite)
     
-    # Render active system parameters to user
     vix_color = "🟢" if india_vix < 15.0 else "🟠"
-    regime_str = "**TRENDING ENGINE** (VIX < 15)" if india_vix < 15.0 else "**SIDEWAYS / VOLATILE PIVOT MATRIX** (VIX ≥ 15)"
+    regime_str = "**TRENDING METRICS** (VIX < 15)" if india_vix < 15.0 else "**KITE PIVOT STRUCTURE** (VIX ≥ 15)"
     
     st.sidebar.markdown("### 🛠️ Live Volatility Guard")
     st.sidebar.markdown(f"**India VIX LTP:** {vix_color} `{india_vix}`")
@@ -292,7 +293,7 @@ def run_integrated_pipeline():
             st.write(f"⏱️ Matrix sync verified at: **{datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')}**")
             
     if should_scan:
-        with st.spinner("🚀 Analyzing indexes, VIX boundaries, and lookbacks..."):
+        with st.spinner("🚀 Syncing indicators to match live Kite terminal data..."):
             results = execute_parallel_scan(meta_df, token_lookup, kite, india_vix)
             if results:
                 st.session_state.master_df = pd.DataFrame(results)
