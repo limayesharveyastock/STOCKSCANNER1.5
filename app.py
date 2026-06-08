@@ -7,33 +7,37 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from kiteconnect import KiteConnect
 
-# --- VISUAL ENHANCEMENTS (CSS) ---
+# --- HIGH-CONTRAST TERMINAL THEME ---
 st.markdown("""
 <style>
-    /* Dark Blue Background */
-    .stApp { background-color: #00008B; color: white; }
+    /* Black Background & Light Text */
+    .stApp { background-color: #000000; color: #E0E0E0; }
     
-    /* Yellow Headers */
-    h1, h2, h3 { color: yellow !important; text-align: center; font-family: 'Courier New', monospace; }
+    /* Headers - Yellow */
+    h1, h2, h3 { color: #FFD700 !important; text-align: center; font-family: 'Courier New', monospace; }
     
-    /* Faint Yellow Table Background with Black Text */
+    /* Dataframes - Dark Charcoal Background, White Text */
     div[data-testid="stDataFrame"] {
-        background-color: #FFFFE0 !important;
-        border: 2px solid yellow;
+        background-color: #1E1E1E !important;
+        border: 1px solid #444;
     }
     div[data-testid="stDataFrame"] * {
-        color: #000000 !important;
+        color: #FFFFFF !important;
     }
     
     /* Metric Cards */
-    [data-testid="stMetricValue"] { color: yellow; }
-    [data-testid="stMetricLabel"] { color: white; }
+    [data-testid="stMetricValue"] { color: #FFD700; }
+    [data-testid="stMetricLabel"] { color: #E0E0E0; }
+    
+    /* Buttons */
+    .stButton>button {
+        background-color: #333 !important;
+        color: #FFD700 !important;
+        border: 1px solid #FFD700;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
-
-# --- VISUAL DIAGRAM CONTEXT ---
-# Visualizing how your structure works:
-# 
 
 st.set_page_config(layout="wide")
 st.title("🎯 NIFTY 50 Blue-Chip Multi-Timeframe Structural Scanner")
@@ -58,12 +62,11 @@ def get_instrument_lookup():
         return {}
 
 def fetch_india_vix(kite):
-    """Fetches live India VIX level to determine active structural regime."""
     try:
         vix_data = kite.ltp("NSE:INDIA VIX")
         return float(vix_data["NSE:INDIA VIX"]["last_price"])
     except Exception:
-        return 14.5 # Strategic baseline fallback if API throttling occurs
+        return 14.5
 
 def load_metadata():
     csv_path = "stock_metadata.csv"
@@ -122,51 +125,30 @@ def load_metadata():
         "UPL": {"Industry": "Chemicals", "Promoter": 32.4, "PE": 22.1, "Ind_PE": 19.5, "PB": 1.5, "ROCE": 11.1},
         "WIPRO": {"Industry": "Information Technology", "Promoter": 72.9, "PE": 23.4, "Ind_PE": 28.2, "PB": 3.4, "ROCE": 21.2}
     }
-
+    
     if os.path.exists(csv_path):
         try:
             df = pd.read_csv(csv_path)
-            if not df.empty and ("Ticker" in df.columns or "Symbol" in df.columns):
-                rename_map = {
-                    "Symbol": "Ticker", "Promoter Holding (%)": "Promoter_Percent",
-                    "Promoter Holding": "Promoter_Percent", "Stock PE": "Stock_PE",
-                    "PE": "Stock_PE", "Industry PE": "Industry_PE", "Price to Book": "PB", "P/B": "PB"
-                }
-                df = df.rename(columns=rename_map)
-                df = df[df["Ticker"].isin(nifty50_universe.keys())]
-                return df
-        except Exception as e:
-            st.error(f"⚠️ CSV parsing error: {e}")
-
-    fallback_data = [{
-        "Ticker": ticker, "Industry": data["Industry"], "Promoter_Percent": data["Promoter"],
-        "Stock_PE": data["PE"], "Industry_PE": data["Ind_PE"], "PB": data["PB"], "ROCE": data["ROCE"]
-    } for ticker, data in nifty50_universe.items()]
+            rename_map = {"Symbol": "Ticker", "Promoter Holding (%)": "Promoter_Percent", "Stock PE": "Stock_PE", "Industry PE": "Industry_PE", "Price to Book": "PB"}
+            df = df.rename(columns=rename_map)
+            df = df[df["Ticker"].isin(nifty50_universe.keys())]
+            return df
+        except: pass
+    
+    fallback_data = [{"Ticker": ticker, "Industry": data["Industry"], "Promoter_Percent": data["Promoter"], "Stock_PE": data["PE"], "Industry_PE": data["Ind_PE"], "PB": data["PB"], "ROCE": data["ROCE"]} for ticker, data in nifty50_universe.items()]
     return pd.DataFrame(fallback_data)
 
-# --- TECHNICAL METRICS ENGINE ---
+# --- TECHNICAL ENGINE ---
 def calculate_indicators(df):
-    df['close'] = pd.to_numeric(df['close'])
-    df['high'] = pd.to_numeric(df['high'])
-    df['low'] = pd.to_numeric(df['low'])
-    df['volume'] = pd.to_numeric(df['volume'])
-    df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
-    df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
-    df['RSI'] = ta.rsi(df['close'], length=14)
+    df['close'] = pd.to_numeric(df['close']); df['high'] = pd.to_numeric(df['high']); df['low'] = pd.to_numeric(df['low']); df['volume'] = pd.to_numeric(df['volume'])
+    df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9); df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26); df['RSI'] = ta.rsi(df['close'], length=14)
     return df
 
 def calculate_session_pivots(df_1d):
-    """Calculates true Fibonacci Pivots using previous day session metrics to match Zerodha Kite charts exactly."""
-    if len(df_1d) < 2:
-        return 0.0, 0.0, 0.0
-    # Extract the last fully completed daily session candle
-    prev_day = df_1d.iloc[-2]
-    high_val = float(prev_day['high'])
-    low_val = float(prev_day['low'])
-    close_val = float(prev_day['close'])
+    if len(df_1d) < 2: return 0.0, 0.0, 0.0
+    prev_day = df_1d.iloc[-2]; high_val = float(prev_day['high']); low_val = float(prev_day['low']); close_val = float(prev_day['close'])
     p = (high_val + low_val + close_val) / 3.0
-    r1 = p + 0.382 * (high_val - low_val)
-    s1 = p - 0.382 * (high_val - low_val)
+    r1 = p + 0.382 * (high_val - low_val); s1 = p - 0.382 * (high_val - low_val)
     return round(p, 2), round(r1, 2), round(s1, 2)
 
 def get_last_crossover_details(df):
@@ -176,126 +158,62 @@ def get_last_crossover_details(df):
     df['sign'] = (df['diff'] > 0).astype(int)
     crosses = df[df['sign'] != df['sign'].shift(1)].iloc[1:]
     if not crosses.empty:
-        last_cross_row = crosses.iloc[-1]
-        bars_ago = len(df) - 1 - crosses.index[-1]
-        c_type = "🔥 Bullish" if last_cross_row['VWMA_9'] > last_cross_row['VWMA_26'] else "❄️ Bearish"
+        last_cross_row = crosses.iloc[-1]; bars_ago = len(df) - 1 - crosses.index[-1]; c_type = "🔥 Bullish" if last_cross_row['VWMA_9'] > last_cross_row['VWMA_26'] else "❄️ Bearish"
         return round(last_cross_row['VWMA_9'], 2), c_type, int(bars_ago)
     return 0.0, "No Cross", 0
 
-# --- DATA COMPILER ---
+# --- PARALLEL SCANNER ---
 def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
-    scan_results = []
-    
-    # Progress UI Element
-    progress_bar = st.progress(0)
-    
+    scan_results = []; progress_bar = st.progress(0)
     def worker(row):
-        symbol = str(row['Ticker']).strip()
-        token = token_lookup.get(symbol)
+        symbol = str(row['Ticker']).strip(); token = token_lookup.get(symbol)
         if not token: return None
         try:
             hist_1d = kite.historical_data(token, from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="day")
             hist_15m = kite.historical_data(token, from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="15minute")
             if not hist_1d or not hist_15m: return None
-            df_1d = calculate_indicators(pd.DataFrame(hist_1d))
-            df_15m = calculate_indicators(pd.DataFrame(hist_15m))
-            
+            df_1d = calculate_indicators(pd.DataFrame(hist_1d)); df_15m = calculate_indicators(pd.DataFrame(hist_15m))
             p_val, r1_val, s1_val = calculate_session_pivots(df_1d)
-            timeframes = {"15M": df_15m, "1D": df_1d}
-            stock_data = {
-                "Stock Name": symbol,
-                "Industry": row.get("Industry", "Blue-Chip Core"),
-                "Promoter Holding (%)": row.get("Promoter_Percent", 0.0),
-                "Stock PE": row.get("Stock_PE", 0.0),
-                "Industry PE": row.get("Industry_PE", 0.0),
-                "PB": row.get("PB", 0.0),
-                "ROCE": row.get("ROCE", 0.0),
-                "LTP": round(float(df_15m.iloc[-1]['close']), 2)
-            }
-            for tf_suffix, df_tf in timeframes.items():
-                latest = df_tf.iloc[-1]
-                ltp = round(float(latest['close']), 2)
-                v9 = float(latest['VWMA_9'])
-                v26 = float(latest['VWMA_26'])
-                rsi = float(latest['RSI'])
-                cross_val, cross_type, periods_ago = get_last_crossover_details(df_tf)
-                signal = "⚪ NEUTRAL"
-                target_val = 0.0
-                sl_val = 0.0
-                
+            stock_data = {"Stock Name": symbol, "Industry": row.get("Industry"), "Promoter Holding (%)": row.get("Promoter_Percent"), "Stock PE": row.get("Stock_PE"), "Industry PE": row.get("Industry_PE"), "PB": row.get("PB"), "ROCE": row.get("ROCE"), "LTP": round(float(df_15m.iloc[-1]['close']), 2)}
+            for tf_suffix, df_tf in {"15M": df_15m, "1D": df_1d}.items():
+                latest = df_tf.iloc[-1]; ltp = float(latest['close']); v9 = float(latest['VWMA_9']); v26 = float(latest['VWMA_26']); rsi = float(latest['RSI']); cross_val, cross_type, periods_ago = get_last_crossover_details(df_tf)
+                signal = "⚪ NEUTRAL"; target_val = 0.0; sl_val = 0.0
                 if india_vix < 15.0:
-                    if ltp > (1.01 * v9) and v9 > v26:
-                        signal = "🟢 BUY"
-                        target_val = round(ltp * 1.015, 2)
-                        sl_val = round(ltp * 0.99, 2)
-                    elif ltp < (0.99 * v9) and v9 < v26:
-                        signal = "🔴 SELL"
-                        target_val = round(ltp * 0.985, 2)
-                        sl_val = round(ltp * 1.01, 2)
+                    if ltp > (1.01 * v9) and v9 > v26: signal = "🟢 BUY"; target_val = round(ltp * 1.015, 2); sl_val = round(ltp * 0.99, 2)
+                    elif ltp < (0.99 * v9) and v9 < v26: signal = "🔴 SELL"; target_val = round(ltp * 0.985, 2); sl_val = round(ltp * 1.01, 2)
                 else:
-                    mid_r1_p = (r1_val + p_val) / 2.0
-                    mid_s1_p = (s1_val + p_val) / 2.0
-                    is_bullish = ("Bullish" in cross_type or (v9 > v26)) and rsi > 50
-                    is_bearish = ("Bearish" in cross_type or (v9 < v26)) and rsi < 50
-                    if is_bullish and ltp <= mid_r1_p:
-                        signal = "🟢 BUY"
-                        target_val = r1_val
-                        target_dist = r1_val - ltp
-                        sl_val = round(ltp - (target_dist / 1.5), 2)
-                    elif is_bearish and ltp >= mid_s1_p:
-                        signal = "🔴 SELL"
-                        target_val = s1_val
-                        target_dist = ltp - s1_val
-                        sl_val = round(ltp + (target_dist / 1.5), 2)
-                
-                within_cross = "🎯 YES" if (cross_val * 0.99) <= ltp <= (cross_val * 1.01) else "No"
-                stock_data.update({
-                    f"Action Signal ({tf_suffix})": signal,
-                    f"Target ({tf_suffix})": target_val,
-                    f"StopLoss ({tf_suffix})": sl_val,
-                    f"RSI ({tf_suffix})": round(rsi, 2),
-                    f"Last Cross Value ({tf_suffix})": cross_val,
-                    f"Last Cross Type ({tf_suffix})": f"{cross_type} ({periods_ago} periods ago)",
-                    f"Within 1% of Cross ({tf_suffix})": within_cross,
-                    f"P / R1 / S1 ({tf_suffix})": f"{p_val} | {r1_val} | {s1_val}"
-                })
+                    mid_r1_p = (r1_val + p_val) / 2.0; mid_s1_p = (s1_val + p_val) / 2.0
+                    if (("Bullish" in cross_type or (v9 > v26)) and rsi > 50 and ltp <= mid_r1_p): signal = "🟢 BUY"; target_val = r1_val; sl_val = round(ltp - (r1_val - ltp)/1.5, 2)
+                    elif (("Bearish" in cross_type or (v9 < v26)) and rsi < 50 and ltp >= mid_s1_p): signal = "🔴 SELL"; target_val = s1_val; sl_val = round(ltp + (ltp - s1_val)/1.5, 2)
+                stock_data.update({f"Action Signal ({tf_suffix})": signal, f"Target ({tf_suffix})": target_val, f"StopLoss ({tf_suffix})": sl_val, f"RSI ({tf_suffix})": round(rsi, 2), f"Last Cross Value ({tf_suffix})": cross_val, f"Last Cross Type ({tf_suffix})": f"{cross_type} ({periods_ago} bars ago)", f"Within 1% of Cross ({tf_suffix})": "🎯 YES" if (cross_val * 0.99) <= ltp <= (cross_val * 1.01) else "No", f"P / R1 / S1 ({tf_suffix})": f"{p_val} | {r1_val} | {s1_val}"})
             return stock_data
-        except Exception: return None
-
+        except: return None
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(worker, row) for _, row in meta_df.iterrows()]
         for i, future in enumerate(as_completed(futures)):
             progress_bar.progress((i + 1) / len(meta_df))
-            res = future.result()
-            if res: scan_results.append(res)
-    progress_bar.empty()
-    return scan_results
+            res = future.result(); scan_results.append(res) if res else None
+    progress_bar.empty(); return scan_results
 
-# --- INTERACTIVE DASHBOARD VIEW ---
+# --- MAIN DASHBOARD ---
 def run_integrated_pipeline():
-    meta_df = load_metadata()
-    if meta_df is None or meta_df.empty: return
-    kite = get_kite()
-    token_lookup = get_instrument_lookup()
-    india_vix = fetch_india_vix(kite)
-    
-    # Visual Sidebar
+    meta_df = load_metadata(); kite = get_kite(); token_lookup = get_instrument_lookup(); india_vix = fetch_india_vix(kite)
     st.sidebar.markdown("### 🛠️ Live Volatility Guard")
-    vix_color = "🟢" if india_vix < 15.0 else "🟠"
-    regime_str = "**TRENDING METRICS** (VIX < 15)" if india_vix < 15.0 else "**KITE PIVOT STRUCTURE** (VIX ≥ 15)"
     st.sidebar.metric("India VIX LTP", india_vix)
-    st.sidebar.markdown(f"**Active Ruleset:** {regime_str}")
-    
     if "master_df" not in st.session_state: st.session_state.master_df = None
-    if "last_run" not in st.session_state: st.session_state.last_run = None
-    
-    current_time = time.time()
-    should_scan = st.session_state.master_df is None or (st.session_state.last_run and (current_time - st.session_state.last_run) >= 900)
-    
-    c_btn1, c_btn2 = st.columns([1, 4])
-    with c_btn1:
-        if st.button("🔄 Force Re-Scan Nifty 50", use_container_width=True): should_scan = True
-    
-    if should_scan:
-        with st.spinner("🚀 Syncing indicators to match live Kite terminal data..."):
-            results = execute_parallel_scan(meta_df, token_lookup, kite, india_vix)
+    if st.sidebar.button("🔄 Force Re-Scan Nifty 50"):
+        results = execute_parallel_scan(meta_df, token_lookup, kite, india_vix)
+        st.session_state.master_df = pd.DataFrame(results); st.rerun()
+    if st.session_state.master_df is not None:
+        master_df = st.session_state.master_df
+        tab1, tab2 = st.tabs(["📊 Technical Multi-Timeframe Scanner", "🏢 Structural Bifurcation View"])
+        with tab1:
+            active_tf = st.radio("Select Active Scanner Frame Layer:", ["15 Minute", "1 Day"], horizontal=True)
+            suffix = " (15M)" if active_tf == "15 Minute" else " (1D)"
+            signals_df = master_df[master_df[f"Action Signal {suffix}"].isin(["🟢 BUY", "🔴 SELL"])]
+            st.dataframe(signals_df, use_container_width=True, hide_index=True)
+        with tab2:
+            st.dataframe(master_df[["Stock Name", "Industry", "Promoter Holding (%)", "Stock PE", "Industry PE", "PB", "ROCE", "LTP"]], use_container_width=True, hide_index=True)
+
+if __name__ == "__main__":
+    run_integrated_pipeline()
