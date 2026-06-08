@@ -504,3 +504,42 @@ if __name__ == "__main__":
         with tab2:
             st.subheader("Valuation Matrix")
             st.dataframe(df[["Stock Name", "Industry", "Stock_PE", "PB", "ROCE"]], use_container_width=True)
+# --- Helper to calculate Crossover Data ---
+def get_crossover_details(df):
+    """Returns (Price, Signal, BarsAgo) for the last 9/26 VWMA cross."""
+    df = df.copy()
+    df['diff'] = df['VWMA_9'] - df['VWMA_26']
+    df['sign'] = (df['diff'] > 0).astype(int)
+    crosses = df[df['sign'] != df['sign'].shift(1)].iloc[1:]
+    
+    if not crosses.empty:
+        last = crosses.iloc[-1]
+        bars_ago = len(df) - crosses.index.get_loc(last.name) - 1
+        signal = "🔥 BULLISH" if last['VWMA_9'] > last['VWMA_26'] else "❄️ BEARISH"
+        return round(last['close'], 2), signal, bars_ago
+    return 0.0, "No Cross", 0
+
+# --- Updated Worker Function ---
+def worker(row, kite, token_lookup):
+    symbol = str(row['Ticker']).strip()
+    token = token_lookup.get(symbol)
+    if not token: return None
+    
+    try:
+        # Fetch 15M Data (Last 10 days)
+        hist_15 = kite.historical_data(token, from_date=(datetime.now()-timedelta(days=10)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="15minute")
+        df_15 = calculate_indicators(pd.DataFrame(hist_15))
+        px_15, sig_15, age_15 = get_crossover_details(df_15)
+        
+        # Fetch 1D Data (Last 200 days)
+        hist_1d = kite.historical_data(token, from_date=(datetime.now()-timedelta(days=200)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="day")
+        df_1d = calculate_indicators(pd.DataFrame(hist_1d))
+        px_1d, sig_1d, age_1d = get_crossover_details(df_1d)
+        
+        return {
+            **row.to_dict(), # Preserves PE, PB, Industry, etc.
+            "LTP": round(df_15.iloc[-1]['close'], 2),
+            "15M Cross": f"{sig_15} @ {px_15} ({age_15} bars ago)",
+            "1D Cross": f"{sig_1d} @ {px_1d} ({age_1d} days ago)"
+        }
+    except: return None
