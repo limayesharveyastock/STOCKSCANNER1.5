@@ -164,14 +164,34 @@ def get_daily_macro_data(_kite, token, symbol):
         df_1d = pd.DataFrame(hist_1d)
         df_1d = calculate_indicators(df_1d)
         latest_1d = df_1d.iloc[-1]
+        prev_1d = df_1d.iloc[-2]
+        
         st_col = latest_1d.filter(like='SUPERT_').index[0]
+        
+        # Calculate daily crossover status
+        if prev_1d['VWMA_9'] <= prev_1d['VWMA_26'] and latest_1d['VWMA_9'] > latest_1d['VWMA_26']:
+            vwma_cross_1d = "🔥 BULLISH CROSS"
+        elif prev_1d['VWMA_9'] >= prev_1d['VWMA_26'] and latest_1d['VWMA_9'] < latest_1d['VWMA_26']:
+            vwma_cross_1d = "❄️ BEARISH CROSS"
+        else:
+            vwma_cross_1d = "🟢 Above" if latest_1d['VWMA_9'] > latest_1d['VWMA_26'] else "🔴 Below"
+
+        # Lookback engine to find the exact price where the trend last flipped
+        above_1d = df_1d['VWMA_9'] > df_1d['VWMA_26']
+        cross_mask_1d = above_1d != above_1d.shift()
+        cross_mask_1d.iloc[0] = False
+        cross_df_1d = df_1d[cross_mask_1d]
+        last_cross_price_1d = float(cross_df_1d['close'].iloc[-1]) if not cross_df_1d.empty else float(latest_1d['close'])
+
         return {
             "RSI_1D": float(latest_1d['RSI']),
             "VOL_MA_1D": float(latest_1d['VOL_MA_50']),
             "VOLUME_1D": float(latest_1d['volume']),
             "SUPERTREND_1D": float(latest_1d[st_col]),
             "VWMA_50_1D": float(latest_1d['VWMA_50']),
-            "VWMA_100_1D": float(latest_1d['VWMA_100'])
+            "VWMA_100_1D": float(latest_1d['VWMA_100']),
+            "VWMA_CROSS_1D": vwma_cross_1d,
+            "VWMA_CROSS_PRICE_1D": last_cross_price_1d
         }
     except Exception:
         return None
@@ -201,11 +221,12 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             df_15m = pd.DataFrame(hist_15m)
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
+            prev_15m = df_15m.iloc[-2]
             
             time.sleep(0.5) 
             
             rsi_15m = latest_15m['RSI']
-            vol_ma_15m = latest_15m['VOL_MA_20']  # Assigned to 20 period configuration
+            vol_ma_15m = latest_15m['VOL_MA_20']  
             curr_vol_15m = latest_15m['volume']
             
             if curr_vol_15m > vol_ma_15m and rsi_15m > 60: trend_15m = "🟢 BULLISH"
@@ -218,6 +239,21 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 
             st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
             
+            # Formulate the 15-Minute exact crossover engine state
+            if prev_15m['VWMA_9'] <= prev_15m['VWMA_26'] and latest_15m['VWMA_9'] > latest_15m['VWMA_26']:
+                vwma_cross_15m = "🔥 BULLISH CROSS"
+            elif prev_15m['VWMA_9'] >= prev_15m['VWMA_26'] and latest_15m['VWMA_9'] < latest_15m['VWMA_26']:
+                vwma_cross_15m = "❄️ BEARISH CROSS"
+            else:
+                vwma_cross_15m = "🟢 Above" if latest_15m['VWMA_9'] > latest_15m['VWMA_26'] else "🔴 Below"
+
+            # 15M lookback to fetch price where the cross triggered
+            above_15m = df_15m['VWMA_9'] > df_15m['VWMA_26']
+            cross_mask_15m = above_15m != above_15m.shift()
+            cross_mask_15m.iloc[0] = False
+            cross_df_15m = df_15m[cross_mask_15m]
+            last_cross_price_15m = float(cross_df_15m['close'].iloc[-1]) if not cross_df_15m.empty else float(latest_15m['close'])
+
             return {
                 "Stock Name": symbol,
                 "Industry": row.get("Industry", "Blue-Chip Core"),
@@ -236,6 +272,8 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 "Vol MA (15M)": round(vol_ma_15m, 1),
                 "Supertrend (15M)": round(st_15m, 2),
                 "Trend Status (15M)": trend_15m,
+                "VWMA Cross (15M)": vwma_cross_15m,
+                "VWMA Cross Price (15M)": round(last_cross_price_15m, 2),
                 "VWMA 9 (15M)": round(latest_15m['VWMA_9'], 2),
                 "VWMA 26 (15M)": round(latest_15m['VWMA_26'], 2),
                 "VWMA 50 (15M)": round(latest_15m['VWMA_50'], 2),
@@ -245,6 +283,8 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 "Vol MA (1D)": round(daily_data["VOL_MA_1D"], 1),
                 "Supertrend (1D)": round(daily_data["SUPERTREND_1D"], 2),
                 "Trend Status (1D)": trend_1d,
+                "VWMA Cross (1D)": daily_data["VWMA_CROSS_1D"],
+                "VWMA Cross Price (1D)": round(daily_data["VWMA_CROSS_PRICE_1D"], 2),
                 "VWMA 50 (1D)": round(daily_data["VWMA_50_1D"], 2),
                 "VWMA 100 (1D)": round(daily_data["VWMA_100_1D"], 2),
             }
@@ -332,12 +372,12 @@ def run_integrated_pipeline():
         
         if active_tf == "15 Minute":
             tech_display_cols = [
-                "Stock Name", "LTP", "VWMA 9 (15M)", "VWMA 26 (15M)", "VWMA 50 (15M)", "VWMA 100 (15M)", 
+                "Stock Name", "LTP", "VWMA Cross (15M)", "VWMA Cross Price (15M)", "VWMA 9 (15M)", "VWMA 26 (15M)", "VWMA 50 (15M)", "VWMA 100 (15M)", 
                 "RSI (15M)", "Vol MA (15M)", "Supertrend (15M)"
             ]
         else:
             tech_display_cols = [
-                "Stock Name", "LTP", "VWMA 50 (1D)", "VWMA 100 (1D)", 
+                "Stock Name", "LTP", "VWMA Cross (1D)", "VWMA Cross Price (1D)", "VWMA 50 (1D)", "VWMA 100 (1D)", 
                 "RSI (1D)", "Vol MA (1D)", "Supertrend (1D)"
             ]
         
