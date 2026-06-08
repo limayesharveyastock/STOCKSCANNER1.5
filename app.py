@@ -356,4 +356,3 @@ def run_integrated_pipeline():
     st.write(f"Pipeline Refresh Complete | Current System Matrix Sync: {datetime.now().strftime('%H:%M:%S')}")
 
 run_integrated_pipeline()
-    
