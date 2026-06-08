@@ -33,35 +33,85 @@ def get_instrument_lookup():
 def load_metadata():
     csv_path = "stock_metadata.csv"
     
-    # Comprehensive, accurate list of true Nifty 200 assets
-    nifty_200_tickers = [
-        "ABB", "ACC", "ADANIENSOL", "ADANIENT", "ADANIGREEN", "ADANIPORTS", "ADANIPOWER", "ATGL", "ABCAPITAL", "ABFRL",
-        "ALKEM", "AMBUJACEM", "APOLLOHOSP", "APLLTD", "ASHOKLEY", "ASIANPAINT", "ASTRAL", "AUROPHARMA", "AXISBANK",
-        "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE", "BALKRISIND", "BANDHANBNK", "BANKBARODA", "BANKINDIA", "BATAINDIA", "BEL", "BERGEPAINT",
-        "BHARATFORG", "BHARTIARTL", "BHEL", "BIOCON", "BOSCHLTD", "BPCL", "BRITANNIA", "BSOFT", "CANBK", "CGPOWER",
-        "CHAMBLFERT", "CHOLAFIN", "CIPLA", "COALINDIA", "COFORGE", "COLPAL", "CONCOR", "COROMANDEL", "CROMPTON", "CUMMINSIND",
-        "CYIENT", "DABUR", "DALBHARAT", "DEEPAKNTR", "DELHIVERY", "DIVISLAB", "DLF", "DRREDDY", "EICHERMOT", "ESCORTS",
-        "EXIDEIND", "FEDERALBNK", "FORTIS", "GAIL", "GLENMARK", "GMRINFRA", "GODREJCP", "GODREJPROP", "GRANULES", "GRASIM",
-        "GUJGASLTD", "HAL", "HAVELLS", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDCOPPER", "HINDPETRO",
-        "HINDUNILVR", "ICICIBANK", "ICICIGI", "ICICIPRULI", "IDBI", "IDEA", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL",
-        "INDIAMART", "INDIGO", "INDUSINDBK", "INDUSTOWER", "INFY", "IOC", "IPCALAB", "IRCTC", "IRFC", "ITC", 
-        "JINDALSTEL", "JIOFIN", "JKCEMENT", "JSWENERGY", "JSWSTEEL", "JUBLFOOD", "KALYANKJIL", "KEI", "KOTAKBANK",
-        "LICI", "LT", "LTIM", "LTTS", "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO", "MARUTI", 
-        "MAXHEALTH", "METROPOLIS", "MFSL", "MGL", "MPHASIS", "MRF", "MUTHOOTFIN", "NATIONALUM", "NAVINFLUOR", "NESTLEIND", 
-        "NMDC", "NTPC", "OBEROIRLTY", "OFSS", "OIL", "ONGC", "PAGEIND", "PATANJALI", "PAYTM", "PEL", 
-        "PERSISTENT", "PETRONET", "PFC", "PIDILITIND", "PIIND", "PNB", "POLYCAB", "POWERGRID", "PRESTIGE", "PVRINOX", 
-        "RAMCOCEM", "RBLBANK", "RECLTD", "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN", "SHREECEM", "SHRIRAMFIN", 
-        "SIEMENS", "SJVN", "SKFINDIA", "SOLARINDS", "SONACOMS", "SUPREMEIND", "SUZLON", "SYNGENE", 
-        "TATACHEM", "TATACOMM", "TATACONSUM", "TATAELXSI", "TATAMOTORS", "TATAPOWER", "TATASTEEL", "TATATECH", "TCS", "TECHM", 
-        "TITAN", "TORNTPHARM", "TORNTPOWER", "TRENT", "TRIDENT", "TVSMOTOR", "UBL", "ULTRACEMCO", "UNIONBANK", "UPL", 
-        "VBL", "VEDL", "VOLTAS", "WHIRLPOOL", "WIPRO", "YESBANK", "ZEEL", "ZENSARTECH", "ZOMATO"
-    ]
+    # Accurate Sector/Industry Vector Mapping Layout for Nifty 200 Assets
+    ticker_industries = {
+        # Banking & Financial Services (BFSI)
+        "AXISBANK": "Banking", "HDFCBANK": "Banking", "ICICIBANK": "Banking", "INDUSINDBK": "Banking", 
+        "KOTAKBANK": "Banking", "SBIN": "Banking", "PNB": "Banking", "BANKBARODA": "Banking", 
+        "CANBK": "Banking", "AUBANK": "Financial Services", "MUTHOOTFIN": "Financial Services", 
+        "CHOLAFIN": "Financial Services", "ABCAPITAL": "Financial Services", "BANDHANBNK": "Banking", 
+        "FEDERALBNK": "Banking", "IDFCFIRSTB": "Banking", "LICI": "Insurance", "MAHABANK": "Banking", 
+        "MFSL": "Financial Services", "POONAWALLA": "Financial Services", "SHRIRAMFIN": "Financial Services", 
+        "UNIONBANK": "Banking", "YESBANK": "Banking", "JIOFIN": "Financial Services", "BAJFINANCE": "Financial Services", 
+        "BAJAJFINSV": "Financial Services", "RECLTD": "Financial Services", "PFC": "Financial Services", 
+        "IRFC": "Financial Services", "SBICARD": "Financial Services", "SBILIFE": "Insurance", 
+        "HDFCLIFE": "Insurance", "ICICIGI": "Insurance", "ICICIPRULI": "Insurance", "IDBI": "Banking", 
+        "MANAPPURAM": "Financial Services", "RBLBANK": "Banking", "BANKINDIA": "Banking",
+        
+        # Technology & Software
+        "HCLTECH": "IT & Software", "INFY": "IT & Software", "LTIM": "IT & Software", "TCS": "IT & Software", 
+        "TECHM": "IT & Software", "WIPRO": "IT & Software", "PERSISTENT": "IT & Software", "COFORGE": "IT & Software", 
+        "MPHASIS": "IT & Software", "LTTS": "IT & Software", "OFSS": "IT & Software", "TATAELXSI": "IT & Software", 
+        "TATATECH": "IT & Software", "ZENSARTECH": "IT & Software", "BSOFT": "IT & Software", "CYIENT": "IT & Software",
+        
+        # Automobiles & Component Manufacturing
+        "BAJAJ-AUTO": "Automobile", "EICHERMOT": "Automobile", "HEROMOTOCO": "Automobile", "M&M": "Automobile", 
+        "MARUTI": "Automobile", "ASHOKLEY": "Automobile", "BALKRISIND": "Auto Ancillaries", "BOSCHLTD": "Auto Ancillaries", 
+        "EXIDEIND": "Auto Ancillaries", "MRF": "Auto Ancillaries", "SONACOMS": "Auto Ancillaries", "TVSMOTOR": "Automobile", 
+        "BHARATFORG": "Auto Ancillaries", "ESCORTS": "Automobile", "M&MFIN": "Financial Services",
+        
+        # Healthcare & Pharmaceuticals
+        "APOLLOHOSP": "Healthcare", "CIPLA": "Pharmaceuticals", "DRREDDY": "Pharmaceuticals", "SUNPHARMA": "Pharmaceuticals", 
+        "LUPIN": "Pharmaceuticals", "AUROPHARMA": "Pharmaceuticals", "ALKEM": "Pharmaceuticals", "APLLTD": "Pharmaceuticals", 
+        "BIOCON": "Pharmaceuticals", "DIVISLAB", "Pharmaceuticals", "FORTIS": "Healthcare", "GLAND": "Pharmaceuticals", 
+        "IPCALAB": "Pharmaceuticals", "MAXHEALTH": "Healthcare", "METROPOLIS": "Healthcare", "SANOFI": "Pharmaceuticals", 
+        "GLENMARK": "Pharmaceuticals", "GRANULES": "Pharmaceuticals", "SYNGENE": "Pharmaceuticals", "TORNTPHARM": "Pharmaceuticals",
+        
+        # Fast Moving Consumer Goods (FMCG) & Retail
+        "ASIANPAINT": "Consumer Goods", "BRITANNIA": "FMCG", "HINDUNILVR": "FMCG", "ITC": "FMCG", 
+        "NESTLEIND": "FMCG", "TATACONSUM": "FMCG", "VBL": "Beverages", "COLPAL": "FMCG", 
+        "MARICO": "FMCG", "GODREJCP": "FMCG", "BERGEPAINT": "Consumer Goods", "ABFRL": "Retail", 
+        "DABUR": "FMCG", "JUBLFOOD": "Consumer Services", "PAGEIND": "Textiles", "PATANJALI": "FMCG", 
+        "VOLTAS": "Consumer Durables", "WHIRLPOOL": "Consumer Durables", "BATAINDIA": "Consumer Goods", 
+        "CROMPTON": "Consumer Durables", "HAVELLS": "Consumer Durables", "TRENT": "Retail",
+        
+        # Energy, Hydrocarbons & Utilities
+        "BPCL": "Oil & Gas", "GAIL": "Oil & Gas", "ONGC": "Oil & Gas", "RELIANCE": "Energy / Conglomerate", 
+        "IOC": "Oil & Gas", "IGL": "Utilities", "MGL": "Utilities", "OIL": "Oil & Gas", 
+        "PETRONET": "Utilities", "HINDPETRO": "Oil & Gas", "NTPC": "Power", "POWERGRID": "Power", 
+        "TATAPOWER": "Power", "SJVN": "Power", "SUZLON": "Green Energy", "JSWENERGY": "Power", 
+        "ADANIGREEN": "Green Energy", "ADANIPOWER": "Power", "ADANIENSOL": "Power Transmission", 
+        "TORNTPOWER": "Power",
+        
+        # Metals, Mining & Core Materials
+        "COALINDIA": "Mining", "HINDALCO": "Metals", "JSWSTEEL": "Metals", "TATASTEEL": "Metals", 
+        "NMDC": "Mining", "SAIL": "Metals", "NATIONALUM": "Metals", "JINDALSTEL": "Metals", 
+        "HINDCOPPER": "Metals", "VEDL": "Metals & Mining", "GRASIM": "Cement / Diversified", 
+        "AMBUJACEM": "Cement", "ACC": "Cement", "ASTRAL": "Industrial Products", "JKCEMENT": "Cement", 
+        "RAMCOCEM": "Cement", "SHREECEM": "Cement", "ULTRACEMCO": "Cement", "DALBHARAT": "Cement",
+        
+        # Capital Goods, Engineering & Logistics
+        "ABB": "Heavy Electrical", "BEL": "Aerospace & Defense", "BHEL": "Heavy Electrical", "CGPOWER": "Heavy Electrical",
+        "HAL": "Aerospace & Defense", "RVNL": "Infrastructure", "IRCTC": "Consumer Services", "DLF": "Realty", 
+        "OBEROIRLTY": "Realty", "GMRINFRA": "Infrastructure", "GODREJPROP": "Realty", "PRESTIGE": "Realty", 
+        "CONCOR": "Logistics", "SIEMENS": "Heavy Electrical", "SKFINDIA": "Industrial Products",
+        
+        # Chemicals & Fertilisers
+        "DEEPAKNTR": "Chemicals", "NAVINFLUOR": "Chemicals", "TATACHEM": "Chemicals", "UPL": "Chemicals", 
+        "PIIND": "Chemicals", "CHAMBLFERT": "Chemicals",
+        
+        # Diversified, Telecom & Media Services
+        "ADANIENT": "Diversified", "ADANIPORTS": "Infrastructure", "KALYANKJIL": "Consumer Goods", "KEI": "Industrial Products", 
+        "PAYTM": "Financial Services", "PEL": "Financial Services", "POLYCAB": "Industrial Products", "SUPREMEIND": "Industrial Products", 
+        "TATACOMM": "Telecom", "TRIDENT": "Textiles", "ZOMATO": "Consumer Services", "IDEA": "Telecom", 
+        "PVRINOX": "Media & Entertainment", "ZEEL": "Media & Entertainment", "SUNTV": "Media & Entertainment"
+    }
     
     def generate_dynamic_fallback():
-        """Generates a structured baseline dataframe if the CSV file is corrupted or missing."""
+        """Generates structured baseline dataframe using accurate sector classifications."""
         fallback_data = [{
             "Ticker": ticker,
-            "Industry": "Core Matrix",
+            "Industry": ticker_industries.get(ticker, "Core Matrix"),
             "Promoter_Percent": 50.0,
             "Stock_PE": 25.0,
             "Industry_PE": 22.0,
@@ -71,7 +121,7 @@ def load_metadata():
             "52W_Low": 500.0,
             "5Y_High": 1500.0,
             "5Y_Low": 200.0
-        } for ticker in sorted(list(set(nifty_200_tickers)))]
+        } for ticker in sorted(list(ticker_industries.keys()))]
         return pd.DataFrame(fallback_data)
 
     # 1. Attempt to resolve and read from local workspace file system
@@ -81,10 +131,10 @@ def load_metadata():
             if not df.empty and "Ticker" in df.columns:
                 return df
         except Exception:
-            # On parser error, fail silently and hand off to fallback engine
+            # On formatting errors, fail silently and hand off to fallback engine
             pass
 
-    # 2. Trigger fallback tracking loop so the app never throws a red screen
+    # 2. Trigger fallback loop if CSV parsing breaks
     return generate_dynamic_fallback()
 
 def calculate_indicators(df):
@@ -202,7 +252,7 @@ def run_integrated_pipeline():
                 "VWMA 50 (1D)": round(latest_1d['VWMA_50'], 2),
                 "VWMA 100 (1D)": round(latest_1d['VWMA_100'], 2),
             })
-            time.sleep(0.25) # Maintained to safely avoid Kite Connect throttle boundaries
+            time.sleep(0.25) # Throttling margin for Kite API stability
             
         except Exception as e:
             time.sleep(0.25)
@@ -219,7 +269,7 @@ def run_integrated_pipeline():
     
     tab1, tab2 = st.tabs(["📊 Technical Multi-Timeframe Scanner", "🏢 Structural Bifurcation View"])
     
-    # --- TAB 1: WORKSPACE INTERACTION ---
+    # --- TAB 1: TECH VIEW ---
     with tab1:
         st.subheader("⚙️ Timeframe Filter Configurator")
         active_tf = st.radio("Select Active Scanner Frame Layer:", ["15 Minute", "1 Day"], horizontal=True)
@@ -306,4 +356,4 @@ def run_integrated_pipeline():
     st.write(f"Pipeline Refresh Complete | Current System Matrix Sync: {datetime.now().strftime('%H:%M:%S')}")
 
 run_integrated_pipeline()
-            
+    
