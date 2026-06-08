@@ -1,4 +1,4 @@
-import streamlit as str
+import streamlit as st
 import pandas as pd
 import pandas_ta as ta
 from kiteconnect import KiteConnect
@@ -36,8 +36,7 @@ def calculate_indicators(df):
 def run_nifty_50_scanner():
     kite = get_kite()
     
-    # NIFTY 50 Trading Symbols and typical Instrument Tokens
-    # Note: Verify tokens in your environment if any mismatches occur
+    # NIFTY 50 Trading Symbols and Instrument Tokens
     nifty_50_stocks = {
         "RELIANCE": "738561",
         "TCS": "2953217",
