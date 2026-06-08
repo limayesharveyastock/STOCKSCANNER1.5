@@ -1,0 +1,51 @@
+# generate_metadata.py
+import pandas as pd
+
+# The comprehensive Nifty 200 Ticker List
+nifty_200_tickers = [
+    # Nifty 50 Tickers
+    "ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", 
+    "BAJAJFINSV", "BEL", "BHARTIARTL", "BPCL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", 
+    "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", 
+    "ICICIBANK", "INDUSINDBK", "INFY", "ITC", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", 
+    "MARUTI", "NESTLEIND", "NTPC", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SBIN", 
+    "SUNPHARMA", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TCS", "TECHM", "TITAN", "ULTRACEMCO", 
+    "WIPRO", "JIOFIN",
+    # Nifty Next 50 & Midcap 100 Liquidity Tickers
+    "HAL", "IRFC", "RECLTD", "PFC", "TATAPOWER", "ZOMATO", "VBL", "DLF", "GAIL", "PNB", 
+    "BANKBARODA", "CANBK", "AMBUJACEM", "ACC", "PIDILITIND", "SRF", "LUPIN", "AUROPHARMA", 
+    "BALKRISIND", "ASHOKLEY", "CHOLAFIN", "AUBANK", "MUTHOOTFIN", "PERSISTENT", "COFORGE", 
+    "MPHASIS", "COLPAL", "MARICO", "GODREJCP", "BERGEPAINT", "RVNL", "IRCTC", "BHEL", 
+    "OBEROIRLTY", "YESBANK", "IDFCFIRSTB", "GMRINFRA", "NMDC", "SAIL", "DEEPAKNTR", "MAXHEALTH",
+    "ABCAPITAL", "ABFRL", "ALKEM", "APLLTD", "ASHOKLEY", "ASTRAL", "ATGL", "BANDHANBNK", 
+    "BIOCON", "BOSCHLTD", "CONCOR", "COROMANDEL", "CUMMINSIND", "DELHIVERY", "DIVISLAB", 
+    "EXIDEIND", "FEDERALBNK", "FORTIS", "GLAND", "GODREJPROP", "GUJGASLTD", "HAVELLS", 
+    "IEX", "IGL", "INDHOTEL", "INDUSTOWER", "IOC", "IPCALAB", "JKCEMENT", "KALYANKJIL", 
+    "KEI", "LICI", "LTTS", "LUPIN", "MRF", "MAHABANK", "METROPOLIS", "MFSL", "MZN", 
+    "NATIONALUM", "NAVINFLUOR", "OBEROIRLTY", "OFSS", "OIL", "PAGEIND", "PAYTM", "PEL", 
+    "POLYCAB", "POONAWALLA", "PRESTIGE", "RAMCOCEM", "SANOFI", "SHREECEM", "SHRIRAMFIN", 
+    "SIEMENS", "SJVN", "SKFINDIA", "SOLARINDS", "SONACOMS", "SUPREMEIND", "SUZLON", 
+    "TATACOMM", "TATACHEM", "TATAELXSI", "TATATECH", "TRIDENT", "TVSMOTOR", "UBL", 
+    "ULTRACEMCO", "UNIONBANK", "UPL", "VOLTAS", "WHIRLPOOL", "ZENSARTECH"
+]
+
+# Create boilerplate structure with baseline placeholders to be filled incrementally
+data = []
+for ticker in sorted(list(set(nifty_200_tickers))):
+    data.append({
+        "Ticker": ticker,
+        "Industry": "Diversified",
+        "Promoter_Percent": 50.0,
+        "Stock_PE": 25.0,
+        "Industry_PE": 22.0,
+        "PB": 3.5,
+        "ROCE": 15.0,
+        "52W_High": 1000.0,
+        "52W_Low": 500.0,
+        "5Y_High": 1500.0,
+        "5Y_Low": 200.0
+    })
+
+df = pd.DataFrame(data)
+df.to_csv("stock_metadata.csv", index=False)
+print("Successfully generated stock_metadata.csv with Nifty 200 structural parameters!")
