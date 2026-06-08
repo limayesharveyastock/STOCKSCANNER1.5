@@ -21,10 +21,11 @@ def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
     df['high'] = pd.to_numeric(df['high'])
     df['low'] = pd.to_numeric(df['low'])
+    df['volume'] = pd.to_numeric(df['volume']) # Crucial step for VWMA calculation
     
-    # Technical Indicators
-    df['EMA_9'] = ta.ema(df['close'], length=9)
-    df['EMA_26'] = ta.ema(df['close'], length=26)
+    # Technical Indicators (Substituted EMA with VWMA)
+    df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
+    df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
     df['RSI'] = ta.rsi(df['close'], length=14)
     
     # Supertrend
@@ -95,14 +96,15 @@ def run_nifty_50_scanner():
             df = calculate_indicators(df)
             latest = df.iloc[-1]
             
-            trend = "🟢 BULLISH" if latest['EMA_9'] > latest['EMA_26'] else "🔴 BEARISH"
+            # Trend Logic: Conditioned on Price relative to VWMA 9
+            trend = "🟢 BULLISH" if latest['close'] > latest['VWMA_9'] else "🔴 BEARISH"
             supertrend_val = latest.filter(like='SUPERT_').iloc[0]
             
             scan_results.append({
                 "Stock Name": name,
                 "LTP": round(latest['close'], 2),
-                "EMA 9": round(latest['EMA_9'], 2),
-                "EMA 26": round(latest['EMA_26'], 2),
+                "VWMA 9": round(latest['VWMA_9'], 2),
+                "VWMA 26": round(latest['VWMA_26'], 2),
                 "RSI (14)": round(latest['RSI'], 2),
                 "Supertrend": round(supertrend_val, 2),
                 "Trend Status": trend
@@ -120,20 +122,20 @@ def run_nifty_50_scanner():
     if scan_results:
         results_df = pd.DataFrame(scan_results)
         
-        # Split into two dataframes based on the crossover condition
+        # Split into DataFrames based on your Price vs VWMA rule
         bullish_df = results_df[results_df["Trend Status"] == "🟢 BULLISH"]
         bearish_df = results_df[results_df["Trend Status"] == "🔴 BEARISH"]
         
         # High-level summary metrics
         c1, c2, c3 = st.columns(3)
         c1.metric("Total Scanned", len(results_df))
-        c2.metric("Above Crossover (Bullish)", len(bullish_df))
-        c3.metric("Below Crossover (Bearish)", len(bearish_df))
+        c2.metric("Price Above VWMA (Bullish)", len(bullish_df))
+        c3.metric("Price Below VWMA (Bearish)", len(bearish_df))
         
         st.divider()
         
-        # Section 1: Above Crossover
-        st.subheader("📈 Stocks Above EMA 9-26 Crossover (Bullish Trend)")
+        # Section 1: Price Above VWMA
+        st.subheader("📈 Stocks with Price Above VWMA (Bullish Trend)")
         if not bullish_df.empty:
             st.dataframe(
                 bullish_df.drop(columns=["Trend Status"]), 
@@ -145,12 +147,12 @@ def run_nifty_50_scanner():
                 }
             )
         else:
-            st.info("No stocks currently above the crossover.")
+            st.info("No stocks currently have a price above their VWMA.")
             
         st.divider()
         
-        # Section 2: Below Crossover
-        st.subheader("📉 Stocks Below EMA 9-26 Crossover (Bearish Trend)")
+        # Section 2: Price Below VWMA
+        st.subheader("📉 Stocks with Price Below VWMA (Bearish Trend)")
         if not bearish_df.empty:
             st.dataframe(
                 bearish_df.drop(columns=["Trend Status"]), 
@@ -162,7 +164,7 @@ def run_nifty_50_scanner():
                 }
             )
         else:
-            st.info("No stocks currently below the crossover.")
+            st.info("No stocks currently have a price below their VWMA.")
             
     else:
         st.warning("No data retrieved during scan.")
@@ -170,4 +172,3 @@ def run_nifty_50_scanner():
     st.write(f"Last data pull complete at: {datetime.now().strftime('%H:%M:%S')}")
 
 run_nifty_50_scanner()
-
