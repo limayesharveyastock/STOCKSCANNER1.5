@@ -1,5 +1,5 @@
 streamlit
-kiteconnect
 pandas
 pandas_ta
-numpy<2.3
+plotly
+kiteconnect
