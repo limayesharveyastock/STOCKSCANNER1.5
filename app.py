@@ -30,7 +30,7 @@ def get_instrument_lookup():
         st.error(f"Error fetching instrument master from Kite: {e}")
         return {}
 
-# Secure Loading Engine for CSV Metadata with In-Memory Self-Healing Fallback
+# Secure Loading Engine with Flexible Header Normalization & Visual Diagnostics
 def load_metadata():
     csv_path = "stock_metadata.csv"
     
@@ -106,32 +106,43 @@ def load_metadata():
         "TATACOMM": "Telecom", "TRIDENT": "Textiles", "ZOMATO": "Consumer Services", "IDEA": "Telecom", 
         "PVRINOX": "Media & Entertainment", "ZEEL": "Media & Entertainment", "SUNTV": "Media & Entertainment"
     }
-    
-    def generate_dynamic_fallback():
-        fallback_data = [{
-            "Ticker": ticker,
-            "Industry": ticker_industries.get(ticker, "Core Matrix"),
-            "Promoter_Percent": 50.0,
-            "Stock_PE": 25.0,
-            "Industry_PE": 22.0,
-            "PB": 3.5,
-            "ROCE": 15.0,
-            "52W_High": 1000.0,
-            "52W_Low": 500.0,
-            "5Y_High": 1500.0,
-            "5Y_Low": 200.0
-        } for ticker in sorted(list(ticker_industries.keys()))]
-        return pd.DataFrame(fallback_data)
 
     if os.path.exists(csv_path):
         try:
             df = pd.read_csv(csv_path)
-            if not df.empty and "Ticker" in df.columns:
+            if not df.empty and ("Ticker" in df.columns or "Symbol" in df.columns):
+                # Normalize common header variants so structural mapping doesn't fail
+                rename_map = {
+                    "Symbol": "Ticker",
+                    "Promoter Holding (%)": "Promoter_Percent",
+                    "Promoter Holding": "Promoter_Percent",
+                    "Stock PE": "Stock_PE",
+                    "PE": "Stock_PE",
+                    "Industry PE": "Industry_PE",
+                    "Price to Book": "PB",
+                    "P/B": "PB"
+                }
+                df = df.rename(columns=rename_map)
+                st.sidebar.success("✅ Connected to stock_metadata.csv")
                 return df
-        except Exception:
-            pass
+        except Exception as e:
+            st.sidebar.error(f"⚠️ CSV parsing error: {e}")
 
-    return generate_dynamic_fallback()
+    st.sidebar.warning("⚠️ stock_metadata.csv not found or unreadable. Using static default fallback values.")
+    fallback_data = [{
+        "Ticker": ticker,
+        "Industry": ticker_industries.get(ticker, "Core Matrix"),
+        "Promoter_Percent": 50.0,
+        "Stock_PE": 25.0,
+        "Industry_PE": 22.0,
+        "PB": 3.5,
+        "ROCE": 15.0,
+        "52W_High": 1000.0,
+        "52W_Low": 500.0,
+        "5Y_High": 1500.0,
+        "5Y_Low": 200.0
+    } for ticker in sorted(list(ticker_industries.keys()))]
+    return pd.DataFrame(fallback_data)
 
 def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
@@ -148,7 +159,6 @@ def calculate_indicators(df):
     df = pd.concat([df, st_data], axis=1)
     return df
 
-# High-Performance Cache for 1-Day Macro Indicators (Refreshes once every 4 hours)
 @st.cache_data(ttl=14400)
 def get_daily_macro_data(_kite, token, symbol):
     try:
@@ -175,7 +185,6 @@ def get_daily_macro_data(_kite, token, symbol):
     except Exception:
         return None
 
-# Threaded Scanner Execution Matrix
 def execute_parallel_scan(meta_df, token_lookup, kite):
     scan_results = []
     
@@ -202,7 +211,6 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
             
-            # Paced worker throttling to securely respect Zerodha's 3 requests/sec boundary
             time.sleep(0.7)
             
             rsi_15m = latest_15m['RSI']
@@ -219,18 +227,19 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 
             st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
             
+            # Dynamically fetch structural values safely from row dict parameters
             return {
                 "Stock Name": symbol,
-                "Industry": row["Industry"],
-                "Promoter Holding (%)": row["Promoter_Percent"],
-                "Stock PE": row["Stock_PE"],
-                "Industry PE": row["Industry_PE"],
-                "PB": row["PB"],
-                "ROCE": row["ROCE"],
-                "52W High": row["52W_High"],
-                "52W Low": row["52W_Low"],
-                "5Y High": row["5Y_High"],
-                "5Y Low": row["5Y_Low"],
+                "Industry": row.get("Industry", "Core Matrix"),
+                "Promoter Holding (%)": row.get("Promoter_Percent", 0.0),
+                "Stock PE": row.get("Stock_PE", 0.0),
+                "Industry PE": row.get("Industry_PE", 0.0),
+                "PB": row.get("PB", 0.0),
+                "ROCE": row.get("ROCE", 0.0),
+                "52W High": row.get("52W_High", 0.0),
+                "52W Low": row.get("52W_Low", 0.0),
+                "5Y High": row.get("5Y_High", 0.0),
+                "5Y Low": row.get("5Y_Low", 0.0),
                 "LTP": round(latest_15m['close'], 2),
                 
                 "RSI (15M)": round(rsi_15m, 2),
@@ -268,7 +277,6 @@ def run_integrated_pipeline():
     kite = get_kite()
     token_lookup = get_instrument_lookup()
     
-    # Initialize Memory Persistence layers
     if "master_df" not in st.session_state:
         st.session_state.master_df = None
     if "last_run" not in st.session_state:
@@ -282,7 +290,6 @@ def run_integrated_pipeline():
     elif st.session_state.last_run is not None and (current_time - st.session_state.last_run) >= 900:
         should_scan = True
         
-    # Top Level Control Grid
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
         if st.button("🔄 Force Re-Scan Market", use_container_width=True):
@@ -397,4 +404,4 @@ def run_integrated_pipeline():
             st.warning("No portfolios pass matching criteria filters.")
 
 run_integrated_pipeline()
-        
+    
