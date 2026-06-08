@@ -8,53 +8,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from kiteconnect import KiteConnect
 
 st.set_page_config(layout="wide")
-
-# --- HIGH-CONTRAST BLACK TERMINAL STYLING ---
-st.markdown("""
-<style>
-    /* Dark Terminal Background & Base Font Configuration */
-    .stApp { background-color: #000000; color: #E0E0E0; }
-    
-    /* Headers & Component Subtitles - Yellow Courier */
-    h1, h2, h3, [data-testid="stHeader"] { color: #FFD700 !important; text-align: center; font-family: 'Courier New', monospace; font-weight: bold; }
-    
-    /* Grid View Styling - Charcoal Surface Container with High Contrast Elements */
-    div[data-testid="stDataFrame"] {
-        background-color: #1E1E1E !important;
-        border: 1px solid #444444;
-        border-radius: 4px;
-        padding: 5px;
-    }
-    
-    /* Force Raw Data Cells to Output Pure High-Contrast White */
-    div[data-testid="stDataFrame"] * {
-        color: #FFFFFF !important;
-    }
-    
-    /* Streamlit Metric Value Adjustments */
-    [data-testid="stMetricValue"] { color: #FFD700 !important; font-family: 'Courier New', monospace; font-weight: bold; }
-    [data-testid="stMetricLabel"] { color: #B0B0B0 !important; font-size: 13px !important; }
-    
-    /* Custom High Contrast Filter Configurator Panel Labels */
-    .stRadio > label, .stSelectbox > label { color: #FFD700 !important; font-family: 'Courier New', monospace; }
-    
-    /* System Synchronization Push Button */
-    .stButton>button {
-        background-color: #222222 !important;
-        color: #FFD700 !important;
-        border: 1px solid #FFD700 !important;
-        font-weight: bold !important;
-        font-family: 'Courier New', monospace !important;
-        border-radius: 4px !important;
-    }
-    .stButton>button:hover {
-        background-color: #333333 !important;
-        color: #FFFFFF !important;
-        border: 1px solid #FFFFFF !important;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("🎯 NIFTY 50 Blue-Chip Multi-Timeframe Structural Scanner")
 
 # Initialize Kite connection
@@ -202,7 +155,7 @@ def get_crossover_signal(df):
     elif prev['VWMA_9'] >= prev['VWMA_26'] and latest['VWMA_9'] < latest['VWMA_26']:
         return "❄️ 9 CROSSES 26 FROM ABOVE"
         
-    # 2. Cross occurred exactly 1 candle ago
+    # 2. Cross occurred exactly 1 candle ago (helps track immediate post-breakouts)
     if prev_2['VWMA_9'] <= prev_2['VWMA_26'] and prev['VWMA_9'] > prev['VWMA_26']:
         return "🔥 9 CROSSES 26 FROM BELOW (1 Bar Ago)"
     elif prev_2['VWMA_9'] >= prev_2['VWMA_26'] and prev['VWMA_9'] < prev['VWMA_26']:
@@ -224,10 +177,14 @@ def get_daily_macro_data(_kite, token, symbol):
         df_1d = pd.DataFrame(hist_1d)
         df_1d = calculate_indicators(df_1d)
         latest_1d = df_1d.iloc[-1]
+        prev_1d = df_1d.iloc[-2]
         
         st_col = latest_1d.filter(like='SUPERT_').index[0]
+        
+        # Exact directional change calculator
         vwma_cross_signal_1d = get_crossover_signal(df_1d)
         
+        # Historical absolute anchor points
         above_1d = df_1d['VWMA_9'] > df_1d['VWMA_26']
         cross_mask_1d = above_1d != above_1d.shift()
         cross_mask_1d.iloc[0] = False
@@ -289,8 +246,10 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             curr_vol_15m = latest_15m['volume']
             curr_price_15m = latest_15m['close']
             
+            # Formulate the 15-Minute explicit structural directional trigger
             vwma_cross_signal_15m = get_crossover_signal(df_15m)
 
+            # Historical baseline lookback calculation
             above_15m = df_15m['VWMA_9'] > df_15m['VWMA_26']
             cross_mask_15m = above_15m != above_15m.shift()
             cross_mask_15m.iloc[0] = False
@@ -383,8 +342,7 @@ def run_integrated_pipeline():
                 st.session_state.last_run = current_time
                 st.rerun()
 
-    if st.session_state.master_df is None or st.session_state.master_df.empty:
-        st.warning("No data found or scanner is currently loading empty data fields.")
+    if st.session_state.master_df is None:
         return
         
     master_df = st.session_state.master_df
@@ -394,19 +352,9 @@ def run_integrated_pipeline():
     with tab1:
         st.subheader("⚙️ Timeframe Filter Configurator")
         active_tf = st.radio("Select Active Scanner Frame Layer:", ["15 Minute", "1 Day"], horizontal=True)
-        
-        # --- FIX: EXACTLY MAP THE COLUMNS PRODUCED BY THE WORKER ENGINE ---
         suffix = " (15M)" if active_tf == "15 Minute" else " (1D)"
         trend_col = f"Trend Status{suffix}"
         
-        # --- KEYERROR PROTECTION GATE ---
-        if trend_col not in master_df.columns:
-            st.error(f"Critical Error: Column '{trend_col}' not found in active data fields. Relaunching scan...")
-            if st.button("Re-initiate Pipeline"):
-                st.session_state.master_df = None
-                st.rerun()
-            return
-            
         bullish_df = master_df[master_df[trend_col] == "🟢 BULLISH"]
         bearish_df = master_df[master_df[trend_col] == "🔴 BEARISH"]
         neutral_df = master_df[master_df[trend_col] == "⚪ NEUTRAL"]
@@ -429,9 +377,6 @@ def run_integrated_pipeline():
                 "Stock Name", "LTP", "VWMA Cross Indicator (1D)", "VWMA Cross Price (1D)", 
                 "RSI (1D)", "Vol MA (1D)", "Supertrend (1D)"
             ]
-        
-        # Filter down columns safely to protect against internal rendering shifts
-        tech_display_cols = [col for col in tech_display_cols if col in master_df.columns]
         
         st.subheader(f"🔥 Momentum Surge Buy Signals ({active_tf})")
         if not bullish_df.empty:
@@ -469,8 +414,6 @@ def run_integrated_pipeline():
             bifurcated_df = bifurcated_df[bifurcated_df["Promoter Tier"] == selected_tier]
             
         display_cols = ["Stock Name", "Industry", "Promoter Holding (%)", "Stock PE", "Industry PE", "PB", "ROCE"]
-        display_cols = [col for col in display_cols if col in bifurcated_df.columns]
-        
         if not bifurcated_df.empty:
             st.dataframe(bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]), use_container_width=True, hide_index=True)
 
