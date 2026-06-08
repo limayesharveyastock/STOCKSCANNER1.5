@@ -6,7 +6,7 @@ import time
 from kiteconnect import KiteConnect
 
 st.set_page_config(layout="wide")
-st.title("🚀 NIFTY 50 Multi-Dimensional Scanner")
+st.title("🚀 NIFTY 200 Multi-Dimensional Scanner")
 
 # Initialize Kite connection
 @st.cache_resource
@@ -28,8 +28,9 @@ def get_instrument_lookup():
         st.error(f"Error fetching instrument master from Kite: {e}")
         return {}
 
-# Expanded Metadata Matrix: Industry PE, PE, PB, ROCE, 52W Ranges, and 5Y Ranges
+# Expanded Nifty 200 Metadata Matrix
 STOCK_METADATA = {
+    # --- NIFTY 50 CORE ---
     "ADANIENT": {"Industry": "Conglomerate", "Promoter%": 72.6, "PE": 92.4, "Ind_PE": 61.2, "PB": 9.2, "ROCE": 9.8, "52W_H": 3450.0, "52W_L": 2150.0, "5Y_H": 4190.0, "5Y_L": 130.0},
     "ADANIPORTS": {"Industry": "Infrastructure", "Promoter%": 65.9, "PE": 35.1, "Ind_PE": 28.4, "PB": 4.8, "ROCE": 13.2, "52W_H": 1620.0, "52W_L": 990.0, "5Y_H": 1620.0, "5Y_L": 240.0},
     "APOLLOHOSP": {"Industry": "Healthcare", "Promoter%": 29.3, "PE": 88.7, "Ind_PE": 45.6, "PB": 9.4, "ROCE": 11.7, "52W_H": 7400.0, "52W_L": 5700.0, "5Y_H": 7400.0, "5Y_L": 1200.0},
@@ -80,7 +81,49 @@ STOCK_METADATA = {
     "TITAN": {"Industry": "Consumer Goods", "Promoter%": 52.9, "PE": 85.4, "Ind_PE": 51.1, "PB": 19.8, "ROCE": 23.5, "52W_H": 3890.0, "52W_L": 3050.0, "5Y_H": 3890.0, "5Y_L": 800.0},
     "ULTRACEMCO": {"Industry": "Materials & Cement", "Promoter%": 59.9, "PE": 41.2, "Ind_PE": 30.2, "PB": 4.8, "ROCE": 12.8, "52W_H": 12100.0, "52W_L": 8200.0, "5Y_H": 12100.0, "5Y_L": 3000.0},
     "WIPRO": {"Industry": "Information Technology", "Promoter%": 72.8, "PE": 22.9, "Ind_PE": 28.1, "PB": 4.6, "ROCE": 21.1, "52W_H": 550.0, "52W_L": 380.0, "5Y_H": 740.0, "5Y_L": 160.0},
-    "JIOFIN": {"Industry": "Banking & Finance", "Promoter%": 47.7, "PE": 122.4, "Ind_PE": 24.5, "PB": 1.8, "ROCE": 4.9, "52W_H": 400.0, "52W_L": 200.0, "5Y_H": 400.0, "5Y_L": 200.0}
+    "JIOFIN": {"Industry": "Banking & Finance", "Promoter%": 47.7, "PE": 122.4, "Ind_PE": 24.5, "PB": 1.8, "ROCE": 4.9, "52W_H": 400.0, "52W_L": 200.0, "5Y_H": 400.0, "5Y_L": 200.0},
+
+    # --- NIFTY JUNIOR / NEXT 50 ADDITIONS ---
+    "HAL": {"Industry": "Defense & Capital Goods", "Promoter%": 71.6, "PE": 41.5, "Ind_PE": 42.1, "PB": 10.5, "ROCE": 29.8, "52W_H": 4850.0, "52W_L": 1850.0, "5Y_H": 4850.0, "5Y_L": 280.0},
+    "IRFC": {"Industry": "Banking & Finance", "Promoter%": 86.4, "PE": 32.8, "Ind_PE": 15.2, "PB": 4.1, "ROCE": 5.4, "52W_H": 220.0, "52W_L": 32.0, "5Y_H": 220.0, "5Y_L": 20.0},
+    "RECLTD": {"Industry": "Banking & Finance", "Promoter%": 52.6, "PE": 11.2, "Ind_PE": 24.5, "PB": 2.2, "ROCE": 9.4, "52W_H": 650.0, "52W_L": 160.0, "5Y_H": 650.0, "5Y_L": 80.0},
+    "PFC": {"Industry": "Banking & Finance", "Promoter%": 56.0, "PE": 10.5, "Ind_PE": 24.5, "PB": 1.9, "ROCE": 9.1, "52W_H": 580.0, "52W_L": 150.0, "5Y_H": 580.0, "5Y_L": 75.0},
+    "TATAPOWER": {"Industry": "Energy & Oil", "Promoter%": 46.9, "PE": 34.2, "Ind_PE": 12.1, "PB": 3.8, "ROCE": 11.9, "52W_H": 490.0, "52W_L": 210.0, "5Y_H": 490.0, "5Y_L": 30.0},
+    "ZOMATO": {"Industry": "FMCG", "Promoter%": 0.0, "PE": 142.1, "Ind_PE": 44.3, "PB": 9.4, "ROCE": 4.2, "52W_H": 280.0, "52W_L": 75.0, "5Y_H": 280.0, "5Y_L": 40.0},
+    "VBL": {"Industry": "FMCG", "Promoter%": 63.1, "PE": 88.5, "Ind_PE": 44.3, "PB": 16.2, "ROCE": 28.1, "52W_H": 1650.0, "52W_L": 820.0, "5Y_H": 1650.0, "5Y_L": 120.0},
+    "DLF": {"Industry": "Infrastructure", "Promoter%": 74.1, "PE": 72.4, "Ind_PE": 28.4, "PB": 6.2, "ROCE": 7.4, "52W_H": 950.0, "52W_L": 460.0, "5Y_H": 950.0, "5Y_L": 130.0},
+    "GAIL": {"Industry": "Energy & Oil", "Promoter%": 51.9, "PE": 14.8, "Ind_PE": 12.1, "PB": 2.2, "ROCE": 15.3, "52W_H": 240.0, "52W_L": 105.0, "5Y_H": 240.0, "5Y_L": 65.0},
+    "PNB": {"Industry": "Banking & Finance", "Promoter%": 73.1, "PE": 15.4, "Ind_PE": 15.2, "PB": 1.2, "ROCE": 7.8, "52W_H": 140.0, "52W_L": 50.0, "5Y_H": 140.0, "5Y_L": 25.0},
+    "BANKBARODA": {"Industry": "Banking & Finance", "Promoter%": 64.0, "PE": 7.8, "Ind_PE": 15.2, "PB": 1.1, "ROCE": 9.8, "52W_H": 290.0, "52W_L": 160.0, "5Y_H": 290.0, "5Y_L": 40.0},
+    "CANBK": {"Industry": "Banking & Finance", "Promoter%": 63.0, "PE": 6.9, "Ind_PE": 15.2, "PB": 1.0, "ROCE": 9.4, "52W_H": 130.0, "52W_L": 60.0, "5Y_H": 130.0, "5Y_L": 15.0},
+    "AMBUJACEM": {"Industry": "Materials & Cement", "Promoter%": 67.3, "PE": 44.1, "Ind_PE": 30.2, "PB": 3.9, "ROCE": 11.2, "52W_H": 690.0, "52W_L": 400.0, "5Y_H": 690.0, "5Y_L": 140.0},
+    "ACC": {"Industry": "Materials & Cement", "Promoter%": 56.7, "PE": 28.1, "Ind_PE": 30.2, "PB": 2.9, "ROCE": 14.1, "52W_H": 2750.0, "52W_L": 1800.0, "5Y_H": 2750.0, "5Y_L": 900.0},
+    "PIDILITIND": {"Industry": "Consumer Goods", "Promoter%": 69.9, "PE": 74.3, "Ind_PE": 51.1, "PB": 18.2, "ROCE": 33.1, "52W_H": 3200.0, "52W_L": 2300.0, "5Y_H": 3200.0, "5Y_L": 1200.0},
+    "SRF": {"Industry": "Chemicals", "Promoter%": 50.5, "PE": 41.2, "Ind_PE": 34.0, "PB": 5.4, "ROCE": 17.2, "52W_H": 2700.0, "52W_L": 2100.0, "5Y_H": 2850.0, "5Y_L": 700.0},
+    "LUPIN": {"Industry": "Pharmaceuticals", "Promoter%": 47.1, "PE": 38.5, "Ind_PE": 31.8, "PB": 4.1, "ROCE": 13.9, "52W_H": 1800.0, "52W_L": 900.0, "5Y_H": 1800.0, "5Y_L": 550.0},
+    "AUROPHARMA": {"Industry": "Pharmaceuticals", "Promoter%": 51.8, "PE": 21.2, "Ind_PE": 31.8, "PB": 2.8, "ROCE": 14.2, "52W_H": 1450.0, "52W_L": 700.0, "5Y_H": 1450.0, "5Y_L": 400.0},
+    "BALKRISIND": {"Industry": "Automobile", "Promoter%": 58.3, "PE": 34.6, "Ind_PE": 26.8, "PB": 5.9, "ROCE": 18.4, "52W_H": 3300.0, "52W_L": 2200.0, "5Y_H": 3300.0, "5Y_L": 750.0},
+    "ASHOKLEY": {"Industry": "Automobile", "Promoter%": 51.5, "PE": 24.2, "Ind_PE": 26.8, "PB": 4.1, "ROCE": 15.3, "52W_H": 240.0, "52W_L": 140.0, "5Y_H": 240.0, "5Y_L": 40.0},
+    "CHOLAFIN": {"Industry": "Banking & Finance", "Promoter%": 50.4, "PE": 31.8, "Ind_PE": 24.5, "PB": 5.2, "ROCE": 12.4, "52W_H": 1550.0, "52W_L": 1000.0, "5Y_H": 1550.0, "5Y_L": 250.0},
+    "AUBANK": {"Industry": "Banking & Finance", "Promoter%": 25.4, "PE": 29.5, "Ind_PE": 15.2, "PB": 3.4, "ROCE": 10.9, "52W_H": 800.0, "52W_L": 560.0, "5Y_H": 800.0, "5Y_L": 350.0},
+    "MUTHOOTFIN": {"Industry": "Banking & Finance", "Promoter%": 73.4, "PE": 16.2, "Ind_PE": 24.5, "PB": 2.8, "ROCE": 13.5, "52W_H": 1900.0, "52W_L": 1150.0, "5Y_H": 1900.0, "5Y_L": 500.0},
+    "PERSISTENT": {"Industry": "Information Technology", "Promoter%": 31.1, "PE": 54.2, "Ind_PE": 28.1, "PB": 11.4, "ROCE": 31.2, "52W_H": 4950.0, "52W_L": 2800.0, "5Y_H": 4950.0, "5Y_L": 300.0},
+    "COFORGE": {"Industry": "Information Technology", "Promoter%": 0.0, "PE": 48.9, "Ind_PE": 28.1, "PB": 9.1, "ROCE": 24.3, "52W_H": 6800.0, "52W_L": 4200.0, "5Y_H": 6800.0, "5Y_L": 900.0},
+    "MPHASIS": {"Industry": "Information Technology", "Promoter%": 55.4, "PE": 27.2, "Ind_PE": 28.1, "PB": 5.1, "ROCE": 22.8, "52W_H": 2800.0, "52W_L": 1900.0, "5Y_H": 3400.0, "5Y_L": 700.0},
+    "COLPAL": {"Industry": "FMCG", "Promoter%": 51.0, "PE": 58.4, "Ind_PE": 44.3, "PB": 41.2, "ROCE": 92.4, "52W_H": 3100.0, "52W_L": 1800.0, "5Y_H": 3100.0, "5Y_L": 1200.0},
+    "MARICO": {"Industry": "FMCG", "Promoter%": 59.4, "PE": 44.5, "Ind_PE": 44.3, "PB": 14.8, "ROCE": 42.1, "52W_H": 680.0, "52W_L": 500.0, "5Y_H": 680.0, "5Y_L": 280.0},
+    "GODREJCP": {"Industry": "FMCG", "Promoter%": 63.2, "PE": 61.2, "Ind_PE": 44.3, "PB": 10.1, "ROCE": 21.5, "52W_H": 1400.0, "52W_L": 950.0, "5Y_H": 1400.0, "5Y_L": 500.0},
+    "BERGEPAINT": {"Industry": "Consumer Goods", "Promoter%": 75.0, "PE": 52.8, "Ind_PE": 51.1, "PB": 12.1, "ROCE": 24.8, "52W_H": 680.0, "52W_L": 450.0, "5Y_H": 850.0, "5Y_L": 300.0},
+    "RVNL": {"Industry": "Defense & Capital Goods", "Promoter%": 72.8, "PE": 49.2, "Ind_PE": 42.1, "PB": 7.8, "ROCE": 17.4, "52W_H": 640.0, "52W_L": 110.0, "5Y_H": 640.0, "5Y_L": 15.0},
+    "IRCTC": {"Industry": "Infrastructure", "Promoter%": 62.4, "PE": 64.5, "Ind_PE": 28.4, "PB": 14.2, "ROCE": 44.1, "52W_H": 1150.0, "52W_L": 640.0, "5Y_H": 1270.0, "5Y_L": 150.0},
+    "BHEL": {"Industry": "Defense & Capital Goods", "Promoter%": 63.2, "PE": 110.4, "Ind_PE": 42.1, "PB": 4.1, "ROCE": 2.1, "52W_H": 330.0, "52W_L": 90.0, "5Y_H": 330.0, "5Y_L": 30.0},
+    "OBEROIRLTY": {"Industry": "Infrastructure", "Promoter%": 67.7, "PE": 32.4, "Ind_PE": 28.4, "PB": 4.2, "ROCE": 11.5, "52W_H": 1950.0, "52W_L": 1100.0, "5Y_H": 1950.0, "5Y_L": 350.0},
+    "YESBANK": {"Industry": "Banking & Finance", "Promoter%": 0.0, "PE": 55.2, "Ind_PE": 15.2, "PB": 1.4, "ROCE": 5.8, "52W_H": 32.0, "52W_L": 15.0, "5Y_H": 85.0, "5Y_L": 10.0},
+    "IDFCFIRSTB": {"Industry": "Banking & Finance", "Promoter%": 35.4, "PE": 19.8, "Ind_PE": 15.2, "PB": 1.5, "ROCE": 7.2, "52W_H": 100.0, "52W_L": 72.0, "5Y_H": 100.0, "5Y_L": 20.0},
+    "GMRINFRA": {"Industry": "Infrastructure", "Promoter%": 59.1, "PE": 98.4, "Ind_PE": 28.4, "PB": 5.1, "ROCE": 8.1, "52W_H": 105.0, "52W_L": 42.0, "5Y_H": 105.0, "5Y_L": 15.0},
+    "NMDC": {"Industry": "Metals & Mining", "Promoter%": 60.8, "PE": 14.1, "Ind_PE": 18.9, "PB": 2.4, "ROCE": 27.5, "52W_H": 280.0, "52W_L": 105.0, "5Y_H": 280.0, "5Y_L": 60.0},
+    "SAIL": {"Industry": "Metals & Mining", "Promoter%": 65.0, "PE": 17.5, "Ind_PE": 18.9, "PB": 1.2, "ROCE": 9.4, "52W_H": 175.0, "52W_L": 82.0, "5Y_H": 175.0, "5Y_L": 25.0},
+    "DEEPAKNTR": {"Industry": "Chemicals", "Promoter%": 45.7, "PE": 38.2, "Ind_PE": 34.0, "PB": 6.8, "ROCE": 22.4, "52W_H": 2600.0, "52W_L": 1800.0, "5Y_H": 3000.0, "5Y_L": 450.0},
 }
 
 def calculate_indicators(df):
@@ -89,7 +132,7 @@ def calculate_indicators(df):
     df['low'] = pd.to_numeric(df['low'])
     df['volume'] = pd.to_numeric(df['volume'])
     
-    # 50-Length parameters preserved for VWMA, Vol MA and structural tracking
+    # 50-Length indicators maintained for Volume and Trend filters
     df['VWMA_50'] = ta.vwma(df['close'], df['volume'], length=50)
     df['VWMA_100'] = ta.vwma(df['close'], df['volume'], length=100)
     df['RSI'] = ta.rsi(df['close'], length=14)
@@ -103,15 +146,15 @@ def calculate_indicators(df):
 def run_integrated_pipeline():
     kite = get_kite()
     token_lookup = get_instrument_lookup()
-    nifty_50_symbols = list(STOCK_METADATA.keys())
+    nifty_200_symbols = list(STOCK_METADATA.keys())
     
     scan_results = []
     progress_bar = st.progress(0)
     status_text = st.empty()
-    total_stocks = len(nifty_50_symbols)
+    total_stocks = len(nifty_200_symbols)
     
-    for index, symbol in enumerate(nifty_50_symbols):
-        status_text.text(f"Syncing Matrix {index + 1}/{total_stocks}: {symbol}...")
+    for index, symbol in enumerate(nifty_200_symbols):
+        status_text.text(f"Syncing Nifty 200 Pipeline {index + 1}/{total_stocks}: {symbol}...")
         progress_bar.progress((index + 1) / total_stocks)
         
         token = token_lookup.get(symbol)
@@ -119,7 +162,7 @@ def run_integrated_pipeline():
             continue
         
         try:
-            # 1. Fetch 15-Minute Structural Frame
+            # Fetch 15-Minute Structural Frame
             hist_15m = kite.historical_data(
                 token, 
                 from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'),
@@ -127,7 +170,7 @@ def run_integrated_pipeline():
                 interval="15minute"
             )
             
-            # 2. Fetch 1-Day Macro Frame (Requesting 200 days to clear 100-MA requirement)
+            # Fetch 1-Day Macro Frame
             hist_1d = kite.historical_data(
                 token, 
                 from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'),
@@ -138,168 +181,10 @@ def run_integrated_pipeline():
             if not hist_15m or len(hist_15m) < 110 or not hist_1d or len(hist_1d) < 110:
                 continue
                 
-            # Process 15 Min Frame
             df_15m = pd.DataFrame(hist_15m)
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
             
-            # Process 1 Day Frame
             df_1d = pd.DataFrame(hist_1d)
             df_1d = calculate_indicators(df_1d)
-            latest_1d = df_1d.iloc[-1]
-            
-            # 15M Technical Calculations
-            rsi_15m = latest_15m['RSI']
-            vol_ma_15m = latest_15m['VOL_MA_50']
-            if curr_vol_15m := latest_15m['volume']:
-                if curr_vol_15m > vol_ma_15m and rsi_15m > 60: trend_15m = "🟢 BULLISH"
-                elif curr_vol_15m > vol_ma_15m and rsi_15m < 40: trend_15m = "🔴 BEARISH"
-                else: trend_15m = "⚪ NEUTRAL"
-            
-            # 1D Technical Calculations
-            rsi_1d = latest_1d['RSI']
-            vol_ma_1d = latest_1d['VOL_MA_50']
-            if curr_vol_1d := latest_1d['volume']:
-                if curr_vol_1d > vol_ma_1d and rsi_1d > 60: trend_1d = "🟢 BULLISH"
-                elif curr_vol_1d > vol_ma_1d and rsi_1d < 40: trend_1d = "🔴 BEARISH"
-                else: trend_1d = "⚪ NEUTRAL"
-                
-            st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
-            st_1d = latest_1d.filter(like='SUPERT_').iloc[0]
-            
-            meta = STOCK_METADATA.get(symbol, {"Industry": "Other", "Promoter%": 0.0, "PE": 0.0, "Ind_PE": 0.0, "PB": 0.0, "ROCE": 0.0, "52W_H": 0, "52W_L": 0, "5Y_H": 0, "5Y_L": 0})
-            
-            scan_results.append({
-                "Stock Name": symbol,
-                "Industry": meta["Industry"],
-                "Promoter Holding (%)": meta["Promoter%"],
-                "Stock PE": meta["PE"],
-                "Industry PE": meta["Ind_PE"],
-                "PB": meta["PB"],
-                "ROCE": meta["ROCE"],
-                "52W High": meta["52W_H"],
-                "52W Low": meta["52W_L"],
-                "5Y High": meta["5Y_H"],
-                "5Y Low": meta["5Y_L"],
-                "LTP": round(latest_15m['close'], 2),
-                
-                # Timeframe Parameter Outputs
-                "RSI (15M)": round(rsi_15m, 2),
-                "Vol MA (15M)": round(vol_ma_15m, 1),
-                "Supertrend (15M)": round(st_15m, 2),
-                "Trend Status (15M)": trend_15m,
-                "VWMA 50 (15M)": round(latest_15m['VWMA_50'], 2),
-                "VWMA 100 (15M)": round(latest_15m['VWMA_100'], 2),
-                
-                "RSI (1D)": round(rsi_1d, 2),
-                "Vol MA (1D)": round(vol_ma_1d, 1),
-                "Supertrend (1D)": round(st_1d, 2),
-                "Trend Status (1D)": trend_1d,
-                "VWMA 50 (1D)": round(latest_1d['VWMA_50'], 2),
-                "VWMA 100 (1D)": round(latest_1d['VWMA_100'], 2),
-            })
-            time.sleep(0.2)
-            
-        except Exception as e:
-            time.sleep(0.2)
-            continue
-
-    progress_bar.empty()
-    status_text.empty()
-    
-    if not scan_results:
-        st.warning("No data retrieved during pipeline scan.")
-        return
-        
-    master_df = pd.DataFrame(scan_results)
-    
-    tab1, tab2 = st.tabs(["📊 Technical Multi-Timeframe Scanner", "🏢 Structural Bifurcation View"])
-    
-    # --- TAB 1: NEW MULTI-TIMEFRAME INTERACTION LAYOUT ---
-    with tab1:
-        st.subheader("⚙️ Timeframe Dashboard Configuration")
-        active_tf = st.radio("Select Active Primary Focus Timeframe:", ["15 Minute", "1 Day"], horizontal=True)
-        
-        suffix = " (15M)" if active_tf == "15 Minute" else " (1D)"
-        trend_col = f"Trend Status{suffix}"
-        
-        bullish_df = master_df[master_df[trend_col] == "🟢 BULLISH"]
-        bearish_df = master_df[master_df[trend_col] == "🔴 BEARISH"]
-        neutral_df = master_df[master_df[trend_col] == "⚪ NEUTRAL"]
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Tracked", len(master_df))
-        c2.metric(f"Bullish Vol Breakout ({active_tf})", len(bullish_df))
-        c3.metric(f"Bearish Vol Breakdown ({active_tf})", len(bearish_df))
-        c4.metric(f"Neutral Grid ({active_tf})", len(neutral_df))
-        
-        st.divider()
-        
-        tech_display_cols = [
-            "Stock Name", "LTP", f"VWMA 50{suffix}", f"VWMA 100{suffix}", 
-            f"RSI{suffix}", f"Vol MA{suffix}", f"Supertrend{suffix}"
-        ]
-        
-        st.subheader(f"🔥 Vol Surge Buy Signals ({active_tf})")
-        if not bullish_df.empty:
-            st.dataframe(bullish_df[tech_display_cols], use_container_width=True, hide_index=True)
-        else:
-            st.info("No stocks currently matching parameters on this timeframe.")
-            
-        st.divider()
-        
-        st.subheader(f"❄️ Vol Surge Sell Signals ({active_tf})")
-        if not bearish_df.empty:
-            st.dataframe(bearish_df[tech_display_cols], use_container_width=True, hide_index=True)
-        else:
-            st.info("No distribution vectors detected.")
-            
-        st.divider()
-        
-        st.subheader(f"⚖️ Neutral Baseline Matrix ({active_tf})")
-        if not neutral_df.empty:
-            st.dataframe(neutral_df[tech_display_cols], use_container_width=True, hide_index=True)
-
-    # --- TAB 2: ADVANCED STRUCTURAL BIFURCATION (UPGRADED METRICS) ---
-    with tab2:
-        st.subheader("🔍 Macro Ownership & Valuation Filter Matrix")
-        f_col1, f_col2 = st.columns(2)
-        
-        with f_col1:
-            all_industries = ["All Industries"] + sorted(list(master_df["Industry"].unique()))
-            selected_industry = st.selectbox("Filter by Sector Class:", all_industries)
-            
-        with f_col2:
-            master_df["Promoter Tier"] = master_df["Promoter Holding (%)"].apply(
-                lambda x: "High (>50%)" if x >= 50.0 else ("Medium (30%-50%)" if x >= 30.0 else "Low/Institutional (<30%)")
-            )
-            all_tiers = ["All Tiers", "High (>50%)", "Medium (30%-50%)", "Low/Institutional (<30%)"]
-            selected_tier = st.selectbox("Filter by Insider Stake Strength:", all_tiers)
-            
-        bifurcated_df = master_df.copy()
-        if selected_industry != "All Industries":
-            bifurcated_df = bifurcated_df[bifurcated_df["Industry"] == selected_industry]
-        if selected_tier != "All Tiers":
-            bifurcated_df = bifurcated_df[bifurcated_df["Promoter Tier"] == selected_tier]
-            
-        st.divider()
-        
-        # Upgraded Columns: PE vs Industry PE side-by-side, PB, ROCE, and 52W & 5Y Ranges
-        display_cols = [
-            "Stock Name", "Industry", "Promoter Holding (%)", 
-            "Stock PE", "Industry PE", "PB", "ROCE", 
-            "52W High", "52W Low", "5Y High", "5Y Low"
-        ]
-        
-        if not bifurcated_df.empty:
-            st.dataframe(
-                bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]),
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.warning("No structural profile matches these specific asset metrics.")
-            
-    st.write(f"Pipeline Refresh Sync Complete: {datetime.now().strftime('%H:%M:%S')}")
-
-run_integrated_pipeline()
+            latest_1d =
