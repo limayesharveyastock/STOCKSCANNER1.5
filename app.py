@@ -142,4 +142,45 @@ def execute_parallel_scan(meta_df, kite, india_vix):
         if not token: return None
         try:
             hist_1d = calculate_indicators(pd.DataFrame(kite.historical_data(token, (datetime.now() - timedelta(200)).strftime('%Y-%m-%d'), datetime.now().strftime('%Y-%m-%d'), "day")))
-            hist_15m = calculate_indicators(pd.DataFrame(kite.historical_data(token, (datetime.now() - timedelta(12
+            hist_15m = calculate_indicators(pd.DataFrame(kite.historical_data(token, (datetime.now() - timedelta(12)).strftime('%Y-%m-%d'), datetime.now().strftime('%Y-%m-%d'), "15minute")))
+            
+            p, r1, s1 = calculate_session_pivots(hist_1d)
+            data = {"Stock Name": symbol, "Industry": row['Industry'], "LTP": round(float(hist_15m.iloc[-1]['close']), 2)}
+            
+            for tf, df in [("15M", hist_15m), ("1D", hist_1d)]:
+                ltp, v9, v26 = float(df.iloc[-1]['close']), float(df.iloc[-1]['VWMA_9']), float(df.iloc[-1]['VWMA_26'])
+                signal = "⚪ NEUTRAL"
+                if india_vix < 15:
+                    if ltp > v9 > v26: signal = "🟢 BUY"
+                    elif ltp < v9 < v26: signal = "🔴 SELL"
+                elif ("Bullish" in get_last_crossover_details(df)[1] and ltp <= (r1+p)/2): signal = "🟢 BUY"
+                elif ("Bearish" in get_last_crossover_details(df)[1] and ltp >= (s1+p)/2): signal = "🔴 SELL"
+                
+                data[f"Action Signal ({tf})"] = signal
+            return data
+        except: return None
+        
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        results = list(ex.map(worker, [row for _, row in meta_df.iterrows()]))
+    return [r for r in results if r]
+
+# --- MAIN DASHBOARD ---
+def run_integrated_pipeline():
+    meta_df = load_metadata(); kite = get_kite(); india_vix = fetch_india_vix(kite)
+    
+    if st.sidebar.button("🔄 Execute Structural Scan"):
+        with st.spinner("Scanning..."):
+            st.session_state.master_df = pd.DataFrame(execute_parallel_scan(meta_df, kite, india_vix))
+            st.rerun()
+
+    if "master_df" in st.session_state and st.session_state.master_df is not None:
+        active_tf = st.radio("Timeframe:", ["15M", "1D"], horizontal=True)
+        col_name = f"Action Signal ({active_tf})"
+        
+        if col_name in st.session_state.master_df.columns:
+            st.dataframe(st.session_state.master_df[st.session_state.master_df[col_name].isin(["🟢 BUY", "🔴 SELL"])], use_container_width=True)
+        else:
+            st.error("Scan results incomplete. Please re-run.")
+
+if __name__ == "__main__":
+    run_integrated_pipeline()
