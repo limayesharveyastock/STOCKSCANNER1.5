@@ -17,7 +17,7 @@ def get_kite():
     kite.set_access_token(access_token)
     return kite
 
-# Dynamically fetch and map all active NSE instrument tokens to prevent truncation
+# Dynamically fetch and map all active NSE instrument tokens
 @st.cache_data(ttl=86400) # Caches the instrument master map for 24 hours
 def get_instrument_lookup():
     kite = get_kite()
@@ -38,13 +38,14 @@ def calculate_indicators(df):
     df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
     df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
     df['RSI'] = ta.rsi(df['close'], length=14)
+    df['VOL_MA_20'] = ta.sma(df['volume'], length=20) # Added 20-period Volume Moving Average
     
     # Supertrend
     st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
     df = pd.concat([df, st_data], axis=1)
     return df
 
-@st.fragment(run_every="900s") # Changed to 900s to auto-refresh every 15 minutes
+@st.fragment(run_every="900s") # Maintained 15-minute auto-refresh cycle
 def run_nifty_50_scanner():
     kite = get_kite()
     token_lookup = get_instrument_lookup()
@@ -85,7 +86,8 @@ def run_nifty_50_scanner():
                 interval="15minute"
             )
             
-            if not hist or len(hist) < 15:
+            # Increased minimum length threshold to ensure Volume MA 20 populates accurately
+            if not hist or len(hist) < 30:
                 continue
                 
             df = pd.DataFrame(hist)
@@ -93,12 +95,16 @@ def run_nifty_50_scanner():
             latest = df.iloc[-1]
             
             rsi_val = latest['RSI']
-            if pd.isna(rsi_val):
+            curr_volume = latest['volume']
+            vol_ma_val = latest['VOL_MA_20']
+            
+            if pd.isna(rsi_val) or pd.isna(vol_ma_val):
                 continue
-                
-            if rsi_val > 70:
+            
+            # Trend Logic: Combines Volume Spike confirmation with RSI Momentum thresholds
+            if curr_volume > vol_ma_val and rsi_val > 60:
                 trend = "🟢 BULLISH"
-            elif rsi_val < 30:
+            elif curr_volume > vol_ma_val and rsi_val < 40:
                 trend = "🔴 BEARISH"
             else:
                 trend = "⚪ NEUTRAL"
@@ -111,6 +117,8 @@ def run_nifty_50_scanner():
                 "VWMA 9": round(latest['VWMA_9'], 2),
                 "VWMA 26": round(latest['VWMA_26'], 2),
                 "RSI (14)": round(rsi_val, 2),
+                "Volume": int(curr_volume),
+                "Vol MA (20)": round(vol_ma_val, 1),
                 "Supertrend": round(supertrend_val, 2),
                 "Trend Status": trend
             })
@@ -131,33 +139,33 @@ def run_nifty_50_scanner():
         bearish_df = results_df[results_df["Trend Status"] == "🔴 BEARISH"]
         neutral_df = results_df[results_df["Trend Status"] == "⚪ NEUTRAL"]
         
-        # Summary Matrix
+        # Summary Grid
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Scanned", len(results_df))
-        c2.metric("RSI > 70 (Bullish)", len(bullish_df))
-        c3.metric("RSI < 30 (Bearish)", len(bearish_df))
-        c4.metric("RSI 30-70 (Neutral)", len(neutral_df))
+        c2.metric("Vol Spike + RSI > 60", len(bullish_df))
+        c3.metric("Vol Spike + RSI < 40", len(bearish_df))
+        c4.metric("Consolidating/No Vol", len(neutral_df))
         
         st.divider()
         
         # Data View Segments
-        st.subheader("🔥 Bullish Trend (RSI Above 70)")
+        st.subheader("🔥 Volume Backed Bullish Breakouts (RSI > 60 & Volume > MA)")
         if not bullish_df.empty:
             st.dataframe(bullish_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
         else:
-            st.info("No stocks currently overbought.")
+            st.info("No stocks currently matching volume surge and strong bullish momentum.")
             
         st.divider()
         
-        st.subheader("❄️ Bearish Trend (RSI Below 30)")
+        st.subheader("❄️ Volume Backed Bearish Breakdowns (RSI < 40 & Volume > MA)")
         if not bearish_df.empty:
             st.dataframe(bearish_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
         else:
-            st.info("No stocks currently oversold.")
+            st.info("No stocks currently matching volume surge and distribution momentum.")
             
         st.divider()
         
-        st.subheader("⚖️ Neutral Market Trend (RSI 30-70)")
+        st.subheader("⚖️ Neutral Zone (Normal Volume or RSI Between 40-60)")
         if not neutral_df.empty:
             st.dataframe(neutral_df.drop(columns=["Trend Status"]), use_container_width=True, hide_index=True)
             
