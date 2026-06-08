@@ -108,7 +108,6 @@ def load_metadata():
                 df = df.rename(columns=rename_map)
                 df = df[df["Ticker"].isin(nifty50_universe.keys())]
                 
-                # Inline fragment safe signaling
                 st.success(f"✅ Connected to stock_metadata.csv ({len(df)} Nifty 50 matches mapped)")
                 return df
         except Exception as e:
@@ -136,9 +135,15 @@ def calculate_indicators(df):
     df['low'] = pd.to_numeric(df['low'])
     df['volume'] = pd.to_numeric(df['volume'])
     
+    # Structural Core Indicators
+    df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
+    df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
     df['VWMA_50'] = ta.vwma(df['close'], df['volume'], length=50)
     df['VWMA_100'] = ta.vwma(df['close'], df['volume'], length=100)
     df['RSI'] = ta.rsi(df['close'], length=14)
+    
+    # Multiple Volume Frame Blocks
+    df['VOL_MA_20'] = ta.sma(df['volume'], length=20)
     df['VOL_MA_50'] = ta.sma(df['volume'], length=50)
     
     st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
@@ -200,7 +205,7 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             time.sleep(0.5) 
             
             rsi_15m = latest_15m['RSI']
-            vol_ma_15m = latest_15m['VOL_MA_50']
+            vol_ma_15m = latest_15m['VOL_MA_20']  # Swapped to Volume SMA 20 length
             curr_vol_15m = latest_15m['volume']
             
             if curr_vol_15m > vol_ma_15m and rsi_15m > 60: trend_15m = "🟢 BULLISH"
@@ -231,12 +236,14 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 "Vol MA (15M)": round(vol_ma_15m, 1),
                 "Supertrend (15M)": round(st_15m, 2),
                 "Trend Status (15M)": trend_15m,
+                "VWMA 9 (15M)": round(latest_15m['VWMA_9'], 2),
+                "VWMA 26 (15M)": round(latest_15m['VWMA_26'], 2),
                 "VWMA 50 (15M)": round(latest_15m['VWMA_50'], 2),
                 "VWMA 100 (15M)": round(latest_15m['VWMA_100'], 2),
                 
                 "RSI (1D)": round(daily_data["RSI_1D"], 2),
                 "Vol MA (1D)": round(daily_data["VOL_MA_1D"], 1),
-                "Supertrend (1D)": round(daily_data["SUPERTREND_1D"], 2),
+                "Supertrend (1D)": round(daily_data["SUPREND_1D"] if "SUPREND_1D" in daily_data else daily_data["SUPERTREND_1D"], 2),
                 "Trend Status (1D)": trend_1d,
                 "VWMA 50 (1D)": round(daily_data["VWMA_50_1D"], 2),
                 "VWMA 100 (1D)": round(daily_data["VWMA_100_1D"], 2),
@@ -255,7 +262,6 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
 
 @st.fragment(run_every="900s")
 def run_integrated_pipeline():
-    # Alerts render cleanly inside the main flow matrix here
     meta_df = load_metadata()
     if meta_df is None:
         return
@@ -283,7 +289,7 @@ def run_integrated_pipeline():
     with c_btn2:
         if st.session_state.last_run:
             last_time_str = datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')
-            st.write(f"⏱️ Matrix sync verified at: **{last_time_str}**")
+            st.write(f"⏱ shrink Matrix sync verified at: **{last_time_str}**")
         else:
             st.write("⏳ Scanner ready to process Nifty 50 tracking.")
             
@@ -323,10 +329,18 @@ def run_integrated_pipeline():
         c4.metric("Consolidation Grid", len(neutral_df))
         
         st.divider()
-        tech_display_cols = [
-            "Stock Name", "LTP", f"VWMA 50{suffix}", f"VWMA 100{suffix}", 
-            f"RSI{suffix}", f"Vol MA{suffix}", f"Supertrend{suffix}"
-        ]
+        
+        # Configure display metrics dynamically based on the active timeframe layout
+        if active_tf == "15 Minute":
+            tech_display_cols = [
+                "Stock Name", "LTP", "VWMA 9 (15M)", "VWMA 26 (15M)", "VWMA 50 (15M)", "VWMA 100 (15M)", 
+                "RSI (15M)", "Vol MA (15M)", "Supertrend (15M)"
+            ]
+        else:
+            tech_display_cols = [
+                "Stock Name", "LTP", "VWMA 50 (1D)", "VWMA 100 (1D)", 
+                "RSI (1D)", "Vol MA (1D)", "Supertrend (1D)"
+            ]
         
         st.subheader(f"🔥 Momentum Surge Buy Signals ({active_tf})")
         if not bullish_df.empty:
@@ -369,10 +383,4 @@ def run_integrated_pipeline():
             st.dataframe(
                 bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]),
                 use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.warning("No portfolios pass matching criteria filters.")
-
-run_integrated_pipeline()
-                
+                hide_inde
