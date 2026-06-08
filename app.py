@@ -419,3 +419,108 @@ def run_integrated_pipeline():
 
 if __name__ == "__main__":
     run_integrated_pipeline()
+import streamlit as st
+import pandas as pd
+import pandas_ta as ta
+from datetime import datetime, timedelta
+import time
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from kiteconnect import KiteConnect
+
+st.set_page_config(layout="wide")
+st.title("🎯 NIFTY 50 Blue-Chip Multi-Timeframe Structural Scanner")
+
+# --- INITIALIZATION ---
+@st.cache_resource
+def get_kite():
+    api_key = st.secrets["api_key"]
+    access_token = st.secrets["access_token"]
+    kite = KiteConnect(api_key=api_key, timeout=15)
+    kite.set_access_token(access_token)
+    return kite
+
+@st.cache_data(ttl=86400)
+def get_instrument_lookup():
+    kite = get_kite()
+    try:
+        instruments = kite.instruments("NSE")
+        return {inst['tradingsymbol']: str(inst['instrument_token']) for inst in instruments}
+    except Exception as e:
+        st.error(f"Error fetching instrument master: {e}")
+        return {}
+
+def load_metadata():
+    csv_path = "stock_metadata.csv"
+    # Placeholder: Ensure your stock_metadata.csv exists with Ticker, Industry, Promoter_Percent, Stock_PE, Industry_PE, PB, ROCE
+    if os.path.exists(csv_path):
+        return pd.read_csv(csv_path)
+    return pd.DataFrame() # Return empty if no CSV
+
+# --- INDICATORS ---
+def calculate_indicators(df):
+    df['close'], df['high'], df['low'], df['volume'] = pd.to_numeric(df['close']), pd.to_numeric(df['high']), pd.to_numeric(df['low']), pd.to_numeric(df['volume'])
+    df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
+    df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
+    df['RSI'] = ta.rsi(df['close'], length=14)
+    st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
+    return pd.concat([df, st_data], axis=1)
+
+def get_crossover_signal(df):
+    if len(df) < 3: return "No Cross"
+    l, p, p2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
+    if p['VWMA_9'] <= p['VWMA_26'] and l['VWMA_9'] > l['VWMA_26']: return "🔥 BULLISH CROSS"
+    if p['VWMA_9'] >= p['VWMA_26'] and l['VWMA_9'] < l['VWMA_26']: return "❄️ BEARISH CROSS"
+    return "No Cross"
+
+def get_last_crossover_info(df):
+    above = df['VWMA_9'] > df['VWMA_26']
+    crosses = df[above != above.shift()]
+    if len(crosses) > 1:
+        lc = crosses.iloc[-1]
+        ctype = "🔥 Bullish" if lc['VWMA_9'] > lc['VWMA_26'] else "❄️ Bearish"
+        return round(lc['close'], 2), ctype
+    return 0.0, "No Cross"
+
+# --- SCANNER ---
+def execute_parallel_scan(meta_df, token_lookup, kite):
+    results = []
+    def worker(row):
+        symbol = str(row['Ticker']).strip()
+        token = token_lookup.get(symbol)
+        if not token: return None
+        try:
+            hist = kite.historical_data(token, from_date=(datetime.now()-timedelta(days=10)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="15minute")
+            df = calculate_indicators(pd.DataFrame(hist))
+            last = df.iloc[-1]
+            last_px, last_type = get_last_crossover_info(df)
+            
+            return {
+                **row.to_dict(), # Keep all structural ratios (PE, PB, ROCE)
+                "LTP": round(last['close'], 2),
+                "VWMA Cross (15M)": get_crossover_signal(df),
+                "Last Cross (15M)": last_type,
+                "Last Cross Price (15M)": last_px,
+                "Trend Status": "🟢 BULLISH" if last['RSI'] > 60 else ("🔴 BEARISH" if last['RSI'] < 40 else "⚪ NEUTRAL")
+            }
+        except: return None
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(worker, row) for _, row in meta_df.iterrows()]
+        for f in as_completed(futures):
+            if f.result(): results.append(f.result())
+    return results
+
+# --- UI ---
+if __name__ == "__main__":
+    meta_df = load_metadata()
+    if st.button("🚀 Scan Nifty 50 Structural Matrix"):
+        results = execute_parallel_scan(meta_df, get_instrument_lookup(), get_kite())
+        df = pd.DataFrame(results)
+        
+        tab1, tab2 = st.tabs(["📊 Technical Scanner", "🏢 Structural Bifurcation"])
+        with tab1:
+            st.dataframe(df, use_container_width=True)
+        with tab2:
+            st.subheader("Valuation Matrix")
+            st.dataframe(df[["Stock Name", "Industry", "Stock_PE", "PB", "ROCE"]], use_container_width=True)
