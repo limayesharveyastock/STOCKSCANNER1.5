@@ -142,7 +142,7 @@ def calculate_indicators(df):
     df['VWMA_100'] = ta.vwma(df['close'], df['volume'], length=100)
     df['RSI'] = ta.rsi(df['close'], length=14)
     
-    # Multiple Volume Frame Blocks
+    # Dynamic Volume Moving Average Filter lengths
     df['VOL_MA_20'] = ta.sma(df['volume'], length=20)
     df['VOL_MA_50'] = ta.sma(df['volume'], length=50)
     
@@ -205,7 +205,7 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             time.sleep(0.5) 
             
             rsi_15m = latest_15m['RSI']
-            vol_ma_15m = latest_15m['VOL_MA_20']  # Swapped to Volume SMA 20 length
+            vol_ma_15m = latest_15m['VOL_MA_20']  # Assigned to 20 period configuration
             curr_vol_15m = latest_15m['volume']
             
             if curr_vol_15m > vol_ma_15m and rsi_15m > 60: trend_15m = "🟢 BULLISH"
@@ -243,7 +243,7 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 
                 "RSI (1D)": round(daily_data["RSI_1D"], 2),
                 "Vol MA (1D)": round(daily_data["VOL_MA_1D"], 1),
-                "Supertrend (1D)": round(daily_data["SUPREND_1D"] if "SUPREND_1D" in daily_data else daily_data["SUPERTREND_1D"], 2),
+                "Supertrend (1D)": round(daily_data["SUPERTREND_1D"], 2),
                 "Trend Status (1D)": trend_1d,
                 "VWMA 50 (1D)": round(daily_data["VWMA_50_1D"], 2),
                 "VWMA 100 (1D)": round(daily_data["VWMA_100_1D"], 2),
@@ -289,7 +289,7 @@ def run_integrated_pipeline():
     with c_btn2:
         if st.session_state.last_run:
             last_time_str = datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')
-            st.write(f"⏱ shrink Matrix sync verified at: **{last_time_str}**")
+            st.write(f"⏱️ Matrix sync verified at: **{last_time_str}**")
         else:
             st.write("⏳ Scanner ready to process Nifty 50 tracking.")
             
@@ -330,7 +330,6 @@ def run_integrated_pipeline():
         
         st.divider()
         
-        # Configure display metrics dynamically based on the active timeframe layout
         if active_tf == "15 Minute":
             tech_display_cols = [
                 "Stock Name", "LTP", "VWMA 9 (15M)", "VWMA 26 (15M)", "VWMA 50 (15M)", "VWMA 100 (15M)", 
@@ -383,4 +382,9 @@ def run_integrated_pipeline():
             st.dataframe(
                 bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]),
                 use_container_width=True,
-                hide_inde
+                hide_index=True
+            )
+        else:
+            st.warning("No portfolios pass matching criteria filters.")
+
+run_integrated_pipeline
