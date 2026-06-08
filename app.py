@@ -360,4 +360,4 @@ def run_integrated_pipeline():
             st.dataframe(bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]), use_container_width=True, hide_index=True)
 
 if __name__ == "__main__":
-    run_integrated_pipeline()                                                                                                                  THIS CODE WAS RUNNING IN AFTER MARKET HOURS ALSO. MAKE T=IT RUN NOW.
+    run_integrated_pipeline()                                                                    
