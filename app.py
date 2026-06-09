@@ -599,40 +599,6 @@ def execute_scan(meta_df, token_lookup, kite, india_vix, scanner_mode):
             if not hist_day: return None
 
 
-try:
-def worker(row):
-    symbol = str(row['Ticker']).strip()
-    token = token_lookup.get(symbol)
-    if not token:
-        return None
-    try:
-        hist_15m = kite.historical_data(
-            token,
-            from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'),
-            to_date=datetime.now().strftime('%Y-%m-%d'),
-            interval="15minute"
-        )
-        if not hist_15m or len(hist_15m) < 110:
-            return None
-
-        df_15m = pd.DataFrame(hist_15m)
-        df_15m = calculate_indicators(df_15m)
-        latest_15m = df_15m.iloc[-1]
-
-        india_vix = fetch_india_vix(kite)   # ← safe inside try
-        signals = trading_signal_logic(latest_15m, india_vix)
-
-        return {
-            "Stock Name": symbol,
-            "Close": round(latest_15m['close'],2),
-            "VWMA Cross (15M)": get_crossover_signal(df_15m),
-            "Signals (15M)": signals,
-            # keep all your existing fields intact...
-        }
-
-    except Exception as e:
-        st.error(f"Error scanning {symbol}: {e}")
-        return None
 
 except Exception as e:
     return None
