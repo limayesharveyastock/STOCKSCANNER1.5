@@ -599,9 +599,26 @@ def execute_scan(meta_df, token_lookup, kite, india_vix, scanner_mode):
             if not hist_day: return None
 
 
-india_vix = fetch_india_vix(kite)
-signals = trading_signal_logic(latest_15m, india_vix)
+try:
+    # whatever you’re doing in this block
+    # e.g. hist = kite.historical_data(...)
+    df = pd.DataFrame(hist)
+    df = calculate_indicators(df, indicator_choice)
+    latest = df.iloc[-1]
 
+    crossover = get_crossover_signal(df)
+    india_vix = fetch_india_vix(kite)   # <-- safe to call here
+    signals = trading_signal_logic(latest, india_vix)
+
+    return {
+        "Stock": symbol,
+        "Close": round(latest['close'],2),
+        "VWMA Cross": crossover,
+        "Signals": signals
+    }
+
+except Exception as e:
+    return None
 result = {
     "Stock Name": symbol,
     "Close": round(latest_15m['close'],2),
