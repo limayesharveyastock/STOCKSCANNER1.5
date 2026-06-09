@@ -415,6 +415,40 @@ def get_crossover_details(df):
         return round(float(last['VWMA_A']), 2), ctype, int(bars_ago)
     return 0.0, "No Cross", 0
 
+
+def get_crossover_signal(df):
+    if len(df) < 3 or 'VWMA_9' not in df.columns:
+        return "No Cross"
+    latest, prev = df.iloc[-1], df.iloc[-2]
+    if prev['VWMA_9'] <= prev['VWMA_26'] and latest['VWMA_9'] > latest['VWMA_26']:
+        return "🔥 9 crosses 26 from below"
+    elif prev['VWMA_9'] >= prev['VWMA_26'] and latest['VWMA_9'] < latest['VWMA_26']:
+        return "❄️ 9 crosses 26 from above"
+    return "No Cross"
+
+def trading_signal_logic(latest, india_vix):
+    signals = []
+    price = latest['close']
+
+    if india_vix < 15 and 'VWMA_9' in latest and 'VWMA_26' in latest:  # Trending Market
+        if price > 1.01 * latest['VWMA_9'] and latest['VWMA_9'] > latest['VWMA_26']:
+            target = round(price * 1.015, 2)
+            stoploss = round(price - (target - price)/1.5, 2)
+            signals.append({"Signal":"BUY","Target":target,"Stoploss":stoploss})
+        elif price < 0.99 * latest['VWMA_9'] and latest['VWMA_9'] < latest['VWMA_26']:
+            target = round(price * 0.985, 2)
+            stoploss = round(price + (price - target)/1.5, 2)
+            signals.append({"Signal":"SELL","Target":target,"Stoploss":stoploss})
+
+    elif 'P' in latest and 'R1' in latest and 'S1' in latest:  # Sideways/Volatile Market
+        pivot, r1, s1 = latest['P'], latest['R1'], latest['S1']
+        midpoint = pivot + (r1 - pivot) * 0.5
+        if price < midpoint:
+            signals.append({"Signal":"BUY","Target":round(r1,2),"Stoploss":round(s1,2)})
+        elif price > midpoint:
+            signals.append({"Signal":"SELL","Target":round(s1,2),"Stoploss":round(r1,2)})
+
+    return signals
 # ─── OPTION CHAIN ─────────────────────────────────────────────────────────────
 def fetch_option_chain(kite, symbol, ltp, nfo_instruments):
     if symbol not in FNO_UNIVERSE:
@@ -564,6 +598,28 @@ def execute_scan(meta_df, token_lookup, kite, india_vix, scanner_mode):
             )
             if not hist_day: return None
 
+
+india_vix = fetch_india_vix(kite)
+signals = trading_signal_logic(latest_15m, india_vix)
+
+result = {
+    "Stock Name": symbol,
+    "Close": round(latest_15m['close'],2),
+    "VWMA Cross (15M)": get_crossover_signal(df_15m),
+    "Signals (15M)": signals,
+    # keep all your existing fields intact...
+}
+india_vix = fetch_india_vix(kite)
+signals = trading_signal_logic(latest_15m, india_vix)
+
+result = {
+    "Stock Name": symbol,
+    "Close": round(latest_1d['close'],2),
+    "VWMA Cross (1d)": get_crossover_signal(df_1d),
+    "Signals (1d)": signals,
+    # keep all your existing fields intact...
+}
+            
             df_day = calculate_indicators(
                 pd.DataFrame(hist_day),
                 mode="longterm" if is_lt else "intraday"
@@ -1030,4 +1086,22 @@ with tab2:
 with tab3:
     if st.button("Run Long Term Scan"):
         df = run_scan(universe, token_lookup, kite, "week", indicator_choice)
+        st.dataframe(df)
+indicator_choice = st.selectbox("Choose Indicator Set", ["VWMA","EMA","Supertrend","Bollinger"])
+
+tab1, tab2, tab3 = st.tabs(["📈 Short Term (15m)", "📉 Mid Term (1D)", "📊 Long Term (1W)"])
+
+with tab1:
+    if st.button("Run Short Term Scan"):
+        df = execute_parallel_scan(universe, token_lookup, kite, interval="15minute", indicator_choice=indicator_choice)
+        st.dataframe(df)
+
+with tab2:
+    if st.button("Run Mid Term Scan"):
+        df = execute_parallel_scan(universe, token_lookup, kite, interval="day", indicator_choice=indicator_choice)
+        st.dataframe(df)
+
+with tab3:
+    if st.button("Run Long Term Scan"):
+        df = execute_parallel_scan(universe, token_lookup, kite, interval="week", indicator_choice=indicator_choice)
         st.dataframe(df)
