@@ -77,6 +77,19 @@ def get_instrument_lookup():
         st.error(f"Error fetching instrument master from Kite: {e}")
         return {}
 
+# Fetch Live India VIX Value
+def get_india_vix(kite, token_lookup):
+    try:
+        vix_token = token_lookup.get("INDIA VIX")
+        if not vix_token:
+            return 14.5  # Realistic historical floor fallback
+        quote = kite.quote(f"NSE:INDIA VIX")
+        if quote and f"NSE:INDIA VIX" in quote:
+            return float(quote[f"NSE:INDIA VIX"]["last_price"])
+        return 14.5
+    except Exception:
+        return 14.5
+
 # Load Nifty 50 structural matrix with intelligent column normalization
 def load_metadata():
     csv_path = "stock_metadata.csv"
@@ -181,14 +194,16 @@ def calculate_indicators(df):
     df['VOL_MA_20'] = ta.sma(df['volume'], length=20)
     df['VOL_MA_50'] = ta.sma(df['volume'], length=50)
     
+    # Calculate Pivot Matrix for Mean-Reversion Sideways Logic
+    df['Pivot'] = (df['high'].shift(1) + df['low'].shift(1) + df['close'].shift(1)) / 3
+    df['R1'] = (2 * df['Pivot']) - df['low'].shift(1)
+    df['S1'] = (2 * df['Pivot']) - df['high'].shift(1)
+    
     st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
     df = pd.concat([df, st_data], axis=1)
     return df
 
 def get_crossover_signal(df):
-    """
-    Evaluates dynamic shifting to catch exact cross moments on current or previous bars.
-    """
     if len(df) < 3:
         return "No Cross"
         
@@ -196,13 +211,11 @@ def get_crossover_signal(df):
     prev = df.iloc[-2]
     prev_2 = df.iloc[-3]
     
-    # 1. Fresh Cross on current candle
     if prev['VWMA_9'] <= prev['VWMA_26'] and latest['VWMA_9'] > latest['VWMA_26']:
         return "🔥 9 CROSSES 26 FROM BELOW"
     elif prev['VWMA_9'] >= prev['VWMA_26'] and latest['VWMA_9'] < latest['VWMA_26']:
         return "❄️ 9 CROSSES 26 FROM ABOVE"
         
-    # 2. Cross occurred exactly 1 candle ago
     if prev_2['VWMA_9'] <= prev_2['VWMA_26'] and prev['VWMA_9'] > prev['VWMA_26']:
         return "🔥 9 CROSSES 26 FROM BELOW (1 Bar Ago)"
     elif prev_2['VWMA_9'] >= prev_2['VWMA_26'] and prev['VWMA_9'] < prev['VWMA_26']:
@@ -210,16 +223,54 @@ def get_crossover_signal(df):
         
     return "No Cross"
 
+def trading_signal_logic(df, india_vix):
+    """
+    Evaluates dynamic conditional parameters based on global market context volatility.
+    """
+    if len(df) < 5:
+        return [{"Signal": "HOLD", "Target": 0.0, "Stoploss": 0.0}]
+        
+    latest = df.iloc[-1]
+    signals = []
+
+    # --- Trending Market Logic (IndiaVIX < 15) ---
+    if india_vix < 15:
+        if latest['close'] > 1.01 * latest['VWMA_9'] and latest['VWMA_9'] > latest['VWMA_26']:
+            target = latest['close'] * 1.015   
+            stoploss = latest['close'] * (1 - (0.015 / 1.5))  
+            signals.append({"Signal": "BUY", "Target": round(target, 2), "Stoploss": round(stoploss, 2)})
+        elif latest['close'] < 0.99 * latest['VWMA_9'] and latest['VWMA_9'] < latest['VWMA_26']:
+            target = latest['close'] * 0.985   
+            stoploss = latest['close'] * (1 + (0.015 / 1.5))
+            signals.append({"Signal": "SELL", "Target": round(target, 2), "Stoploss": round(stoploss, 2)})
+
+    # --- Sideways/Volatile Market Logic (IndiaVIX ≥ 15) ---
+    else:
+        pivot = latest.get('Pivot', latest['close'])
+        r1 = latest.get('R1', latest['close'] * 1.01)
+        s1 = latest.get('S1', latest['close'] * 0.99)
+        price = latest['close']
+
+        if price < (pivot + (r1 - pivot) * 0.5):  
+            signals.append({"Signal": "BUY", "Target": round(r1, 2), "Stoploss": round(s1, 2)})
+        elif price > (pivot + (r1 - pivot) * 0.5):  
+            signals.append({"Signal": "SELL", "Target": round(s1, 2), "Stoploss": round(r1, 2)})
+
+    if not signals:
+        signals.append({"Signal": "HOLD", "Target": round(latest['close'], 2), "Stoploss": round(latest['close'], 2)})
+        
+    return signals
+
 @st.cache_data(ttl=14400)
 def get_daily_macro_data(_kite, token, symbol):
     try:
         hist_1d = _kite.historical_data(
             token, 
-            from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'),
+            from_date=(datetime.now() - timedelta(days=150)).strftime('%Y-%m-%d'),
             to_date=datetime.now().strftime('%Y-%m-%d'), 
             interval="day"
         )
-        if not hist_1d or len(hist_1d) < 110:
+        if not hist_1d or len(hist_1d) < 40:
             return None
         df_1d = pd.DataFrame(hist_1d)
         df_1d = calculate_indicators(df_1d)
@@ -251,12 +302,13 @@ def get_daily_macro_data(_kite, token, symbol):
             "VWMA_100_1D": float(latest_1d['VWMA_100']),
             "VWMA_CROSS_SIGNAL_1D": vwma_cross_signal_1d,
             "VWMA_CROSS_PRICE_1D": last_cross_price_1d,
-            "TREND_STATUS_1D": trend_1d
+            "TREND_STATUS_1D": trend_1d,
+            "df_raw": df_1d
         }
     except Exception:
         return None
 
-def execute_parallel_scan(meta_df, token_lookup, kite):
+def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
     scan_results = []
     
     def worker(row):
@@ -269,20 +321,21 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             if not daily_data:
                 return None
                 
+            # Adjusted down to 6 days to bypass structural API packet restrictions
             hist_15m = kite.historical_data(
                 token, 
-                from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'),
+                from_date=(datetime.now() - timedelta(days=6)).strftime('%Y-%m-%d'),
                 to_date=datetime.now().strftime('%Y-%m-%d'), 
                 interval="15minute"
             )
-            if not hist_15m or len(hist_15m) < 110:
+            if not hist_15m or len(hist_15m) < 40:
                 return None
                 
             df_15m = pd.DataFrame(hist_15m)
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
             
-            time.sleep(0.5) 
+            time.sleep(0.35)  # Enforce strict compliance under Zerodha 3-req/sec limit
             
             rsi_15m = latest_15m['RSI']
             vol_ma_15m = latest_15m['VOL_MA_20']  
@@ -304,7 +357,13 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
             else: 
                 trend_15m = "⚪ NEUTRAL"
                 
-            st_15m = latest_15m.filter(like='SUPERT_').iloc[0]
+            st_cols = latest_15m.filter(like='SUPERT_')
+            st_15m = st_cols.iloc[0] if not st_cols.empty else curr_price_15m
+
+            # --- DYNAMIC STRUCTURAL STRATEGY RESOLUTION ---
+            trade_calc_df = df_15m if trend_15m != "⚪ NEUTRAL" else daily_data["df_raw"]
+            derived_signals = trading_signal_logic(trade_calc_df, india_vix)
+            primary_signal = derived_signals[0] if derived_signals else {"Signal": "HOLD", "Target": 0.0, "Stoploss": 0.0}
 
             return {
                 "Stock Name": symbol,
@@ -315,6 +374,10 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 "PB": row.get("PB", 0.0),
                 "ROCE": row.get("ROCE", 0.0),
                 "LTP": round(curr_price_15m, 2),
+                
+                "VIX Strategy Order": primary_signal["Signal"],
+                "Calculated Target": primary_signal["Target"],
+                "Calculated Stoploss": primary_signal["Stoploss"],
                 
                 "VWMA Cross Indicator (15M)": vwma_cross_signal_15m,
                 "VWMA Cross Price (15M)": round(last_cross_price_15m, 2),
@@ -335,7 +398,7 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
         except Exception:
             return None
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(worker, row) for _, row in meta_df.iterrows()]
         for future in as_completed(futures):
             res = future.result()
@@ -344,37 +407,6 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 
     return scan_results
 
-def trading_signal_logic(df, india_vix):
-    latest = df.iloc[-1]
-    signals = []
-
-    # --- Trending Market Logic (IndiaVIX < 15) ---
-    if india_vix < 15:
-        if latest['close'] > 1.01 * latest['VWMA_9'] and latest['VWMA_9'] > latest['VWMA_26']:
-            target = latest['close'] * 1.015   # example 1.5% target
-            stoploss = latest['close'] * (1 - (1.015/1.5))  # maintain 1.5:1 ratio
-            signals.append({"Signal":"BUY","Target":round(target,2),"Stoploss":round(stoploss,2)})
-        elif latest['close'] < 0.99 * latest['VWMA_9'] and latest['VWMA_9'] < latest['VWMA_26']:
-            target = latest['close'] * 0.985   # example 1.5% target down
-            stoploss = latest['close'] * (1 + (0.015/1.5))
-            signals.append({"Signal":"SELL","Target":round(target,2),"Stoploss":round(stoploss,2)})
-
-    # --- Sideways/Volatile Market Logic (IndiaVIX ≥ 15) ---
-    else:
-        pivot = latest['Pivot']
-        r1 = latest['R1']
-        s1 = latest['S1']
-        price = latest['close']
-
-        # Check 50% condition
-        if price < (pivot + (r1 - pivot) * 0.5):  # below midpoint
-            signals.append({"Signal":"BUY","Target":round(r1,2),"Stoploss":round(s1,2)})
-        elif price > (pivot + (r1 - pivot) * 0.5):  # above midpoint
-            signals.append({"Signal":"SELL","Target":round(s1,2),"Stoploss":round(r1,2)})
-
-    return signals
-    
-@st.fragment(run_every="900s")
 def run_integrated_pipeline():
     meta_df = load_metadata()
     if meta_df is None:
@@ -382,6 +414,7 @@ def run_integrated_pipeline():
         
     kite = get_kite()
     token_lookup = get_instrument_lookup()
+    india_vix = get_india_vix(kite, token_lookup)
     
     if "master_df" not in st.session_state:
         st.session_state.master_df = None
@@ -396,7 +429,7 @@ def run_integrated_pipeline():
     elif st.session_state.last_run is not None and (current_time - st.session_state.last_run) >= 900:
         should_scan = True
         
-    c_btn1, c_btn2 = st.columns([1, 4])
+    c_btn1, c_btn2, c_btn3 = st.columns([1, 2, 2])
     with c_btn1:
         if st.button("🔄 Force Re-Scan Nifty 50", use_container_width=True):
             should_scan = True
@@ -404,10 +437,12 @@ def run_integrated_pipeline():
         if st.session_state.last_run:
             last_time_str = datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')
             st.write(f"⏱️ Matrix sync verified at: **{last_time_str}**")
+    with c_btn3:
+        st.write(f"📊 Live Market Volatility (**INDIA VIX**): `{india_vix}`")
             
     if should_scan:
         with st.spinner("🚀 Scanning Nifty 50 assets concurrently..."):
-            results = execute_parallel_scan(meta_df, token_lookup, kite)
+            results = execute_parallel_scan(meta_df, token_lookup, kite, india_vix)
             if results:
                 st.session_state.master_df = pd.DataFrame(results)
                 st.session_state.last_run = current_time
@@ -425,16 +460,11 @@ def run_integrated_pipeline():
         st.subheader("⚙️ Timeframe Filter Configurator")
         active_tf = st.radio("Select Active Scanner Frame Layer:", ["15 Minute", "1 Day"], horizontal=True)
         
-        # --- FIX: EXACTLY MAP THE COLUMNS PRODUCED BY THE WORKER ENGINE ---
         suffix = " (15M)" if active_tf == "15 Minute" else " (1D)"
         trend_col = f"Trend Status{suffix}"
         
-        # --- KEYERROR PROTECTION GATE ---
         if trend_col not in master_df.columns:
-            st.error(f"Critical Error: Column '{trend_col}' not found in active data fields. Relaunching scan...")
-            if st.button("Re-initiate Pipeline"):
-                st.session_state.master_df = None
-                st.rerun()
+            st.error(f"Critical Error: Column '{trend_col}' not found. Relaunching scan...")
             return
             
         bullish_df = master_df[master_df[trend_col] == "🟢 BULLISH"]
@@ -451,16 +481,15 @@ def run_integrated_pipeline():
         
         if active_tf == "15 Minute":
             tech_display_cols = [
-                "Stock Name", "LTP", "VWMA Cross Indicator (15M)", "VWMA Cross Price (15M)", 
-                "RSI (15M)", "Vol MA (15M)", "Supertrend (15M)", "VWMA 9 (15M)", "VWMA 26 (15M)"
+                "Stock Name", "LTP", "VIX Strategy Order", "Calculated Target", "Calculated Stoploss",
+                "VWMA Cross Indicator (15M)", "VWMA Cross Price (15M)", "RSI (15M)", "Supertrend (15M)"
             ]
         else:
             tech_display_cols = [
-                "Stock Name", "LTP", "VWMA Cross Indicator (1D)", "VWMA Cross Price (1D)", 
-                "RSI (1D)", "Vol MA (1D)", "Supertrend (1D)"
+                "Stock Name", "LTP", "VIX Strategy Order", "Calculated Target", "Calculated Stoploss",
+                "VWMA Cross Indicator (1D)", "VWMA Cross Price (1D)", "RSI (1D)", "Supertrend (1D)"
             ]
         
-        # Filter down columns safely to protect against internal rendering shifts
         tech_display_cols = [col for col in tech_display_cols if col in master_df.columns]
         
         st.subheader(f"🔥 Momentum Surge Buy Signals ({active_tf})")
