@@ -7,10 +7,277 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from kiteconnect import KiteConnect
 
-st.set_page_config(layout="wide")
-st.title("🎯 NIFTY 50 Blue-Chip Multi-Timeframe Structural Scanner")
+st.set_page_config(layout="wide", page_title="NIFTY 50 Scanner", page_icon="📈")
 
-# --- INITIALIZATION ---
+# ─── GLOBAL THEME INJECTION ───────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── Root palette ── */
+:root {
+    --bg-base:       #0A0C10;
+    --bg-surface:    #10141C;
+    --bg-card:       #151A24;
+    --bg-elevated:   #1C2232;
+    --border:        #1F2A3C;
+    --border-bright: #2E3D56;
+
+    --text-primary:  #E8EDF5;
+    --text-secondary:#8A9ABB;
+    --text-muted:    #4A5A78;
+
+    --green:         #00E5A0;
+    --green-dim:     #003D2B;
+    --red:           #FF4D6A;
+    --red-dim:       #3D0012;
+    --amber:         #F5A623;
+    --amber-dim:     #3D2800;
+    --blue-accent:   #3B82F6;
+    --blue-dim:      #0D2045;
+
+    --font-ui:       'Space Grotesk', sans-serif;
+    --font-mono:     'JetBrains Mono', monospace;
+}
+
+/* ── Base reset ── */
+html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+    background-color: var(--bg-base) !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-ui) !important;
+}
+
+[data-testid="stSidebar"] {
+    background-color: var(--bg-surface) !important;
+    border-right: 1px solid var(--border) !important;
+}
+
+/* ── Header ── */
+[data-testid="stHeader"] {
+    background-color: var(--bg-base) !important;
+}
+
+/* ── Page title ── */
+h1 {
+    font-family: var(--font-ui) !important;
+    font-weight: 700 !important;
+    font-size: 1.6rem !important;
+    letter-spacing: -0.02em !important;
+    color: var(--text-primary) !important;
+    padding: 0.5rem 0 0.2rem !important;
+    border-bottom: 1px solid var(--border) !important;
+    margin-bottom: 1.2rem !important;
+}
+
+/* ── Subheaders ── */
+h2, h3 {
+    font-family: var(--font-ui) !important;
+    font-weight: 600 !important;
+    color: var(--text-secondary) !important;
+    font-size: 0.85rem !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    margin-top: 1.4rem !important;
+    margin-bottom: 0.6rem !important;
+}
+
+/* ── Metric cards ── */
+[data-testid="metric-container"] {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    padding: 1rem 1.2rem !important;
+}
+[data-testid="metric-container"] label {
+    font-family: var(--font-ui) !important;
+    font-size: 0.72rem !important;
+    letter-spacing: 0.06em !important;
+    text-transform: uppercase !important;
+    color: var(--text-muted) !important;
+}
+[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    font-family: var(--font-mono) !important;
+    font-size: 1.6rem !important;
+    font-weight: 500 !important;
+    color: var(--text-primary) !important;
+}
+
+/* ── Dataframe / table ── */
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
+}
+iframe[title="st_aggrid"] { background: var(--bg-card); }
+
+/* Streamlit native dataframe cells */
+[data-testid="stDataFrame"] table {
+    background: var(--bg-card) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 0.78rem !important;
+}
+[data-testid="stDataFrame"] th {
+    background: var(--bg-elevated) !important;
+    color: var(--text-secondary) !important;
+    font-family: var(--font-ui) !important;
+    font-size: 0.7rem !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+    border-bottom: 1px solid var(--border-bright) !important;
+    padding: 0.6rem 0.8rem !important;
+}
+[data-testid="stDataFrame"] td {
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--border) !important;
+    padding: 0.5rem 0.8rem !important;
+}
+[data-testid="stDataFrame"] tr:hover td {
+    background: var(--bg-elevated) !important;
+}
+
+/* ── Buttons ── */
+[data-testid="stButton"] > button {
+    background: var(--bg-elevated) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-bright) !important;
+    border-radius: 6px !important;
+    font-family: var(--font-ui) !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.04em !important;
+    padding: 0.5rem 1rem !important;
+    transition: all 0.15s ease !important;
+}
+[data-testid="stButton"] > button:hover {
+    background: var(--blue-dim) !important;
+    border-color: var(--blue-accent) !important;
+    color: var(--blue-accent) !important;
+}
+
+/* ── Radio ── */
+[data-testid="stRadio"] label {
+    font-family: var(--font-ui) !important;
+    font-size: 0.82rem !important;
+    color: var(--text-secondary) !important;
+}
+[data-testid="stRadio"] [data-baseweb="radio"] input:checked + div {
+    border-color: var(--blue-accent) !important;
+}
+
+/* ── Selectbox ── */
+[data-testid="stSelectbox"] > div > div {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-ui) !important;
+    font-size: 0.82rem !important;
+}
+
+/* ── Tabs ── */
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    background: var(--bg-surface) !important;
+    border-bottom: 1px solid var(--border) !important;
+    gap: 0 !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"] {
+    background: transparent !important;
+    color: var(--text-muted) !important;
+    font-family: var(--font-ui) !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.04em !important;
+    padding: 0.7rem 1.2rem !important;
+    border-bottom: 2px solid transparent !important;
+}
+[data-testid="stTabs"] [aria-selected="true"] {
+    color: var(--blue-accent) !important;
+    border-bottom-color: var(--blue-accent) !important;
+    background: transparent !important;
+}
+
+/* ── Sidebar labels ── */
+[data-testid="stSidebar"] p, [data-testid="stSidebar"] span {
+    font-family: var(--font-ui) !important;
+    font-size: 0.82rem !important;
+    color: var(--text-secondary) !important;
+}
+[data-testid="stSidebar"] strong {
+    color: var(--text-primary) !important;
+}
+[data-testid="stSidebar"] code {
+    font-family: var(--font-mono) !important;
+    font-size: 0.8rem !important;
+    background: var(--bg-elevated) !important;
+    color: var(--green) !important;
+    padding: 0.15rem 0.4rem !important;
+    border-radius: 4px !important;
+    border: 1px solid var(--border) !important;
+}
+
+/* ── Info / alert boxes ── */
+[data-testid="stAlert"] {
+    background: var(--blue-dim) !important;
+    border: 1px solid var(--blue-accent) !important;
+    border-radius: 6px !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-ui) !important;
+    font-size: 0.82rem !important;
+}
+
+/* ── Divider ── */
+hr {
+    border-color: var(--border) !important;
+    margin: 1.2rem 0 !important;
+}
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] p {
+    font-family: var(--font-ui) !important;
+    font-size: 0.82rem !important;
+    color: var(--text-secondary) !important;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── CUSTOM HEADER ─────────────────────────────────────────────────────────────
+st.markdown("""
+<div style="display:flex; align-items:center; gap:12px; padding:0.2rem 0 1.2rem;">
+    <div style="
+        background: linear-gradient(135deg, #1C2E4A 0%, #0D2045 100%);
+        border: 1px solid #3B82F6;
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 1.3rem;
+        line-height:1;
+    ">📈</div>
+    <div>
+        <div style="
+            font-family:'Space Grotesk',sans-serif;
+            font-weight:700;
+            font-size:1.25rem;
+            letter-spacing:-0.02em;
+            color:#E8EDF5;
+            line-height:1.2;
+        ">NIFTY 50 Blue-Chip Scanner</div>
+        <div style="
+            font-family:'JetBrains Mono',monospace;
+            font-size:0.7rem;
+            color:#4A5A78;
+            letter-spacing:0.06em;
+            text-transform:uppercase;
+        ">Multi-Timeframe · Structural · Live</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ─── INITIALIZATION ────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_kite():
     api_key = st.secrets["api_key"]
@@ -30,12 +297,11 @@ def get_instrument_lookup():
         return {}
 
 def fetch_india_vix(kite):
-    """Fetches live India VIX level to determine active structural regime."""
     try:
         vix_data = kite.ltp("NSE:INDIA VIX")
         return float(vix_data["NSE:INDIA VIX"]["last_price"])
     except Exception:
-        return 14.5  # Strategic baseline fallback if API throttling occurs
+        return 14.5
 
 def load_metadata():
     csv_path = "stock_metadata.csv"
@@ -116,29 +382,24 @@ def load_metadata():
     } for ticker, data in nifty50_universe.items()]
     return pd.DataFrame(fallback_data)
 
-# --- TECHNICAL METRICS ENGINE ---
+# ─── TECHNICAL METRICS ENGINE ──────────────────────────────────────────────────
 def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
     df['high'] = pd.to_numeric(df['high'])
     df['low'] = pd.to_numeric(df['low'])
     df['volume'] = pd.to_numeric(df['volume'])
-    
     df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
     df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
     df['RSI'] = ta.rsi(df['close'], length=14)
     return df
 
 def calculate_session_pivots(df_1d):
-    """Calculates true Fibonacci Pivots using previous day session metrics to match Zerodha Kite charts exactly."""
     if len(df_1d) < 2:
         return 0.0, 0.0, 0.0
-    
-    # Extract the last fully completed daily session candle
     prev_day = df_1d.iloc[-2]
     high_val = float(prev_day['high'])
     low_val = float(prev_day['low'])
     close_val = float(prev_day['close'])
-    
     p = (high_val + low_val + close_val) / 3.0
     r1 = p + 0.382 * (high_val - low_val)
     s1 = p - 0.382 * (high_val - low_val)
@@ -150,7 +411,6 @@ def get_last_crossover_details(df):
     df['diff'] = df['VWMA_9'] - df['VWMA_26']
     df['sign'] = (df['diff'] > 0).astype(int)
     crosses = df[df['sign'] != df['sign'].shift(1)].iloc[1:]
-    
     if not crosses.empty:
         last_cross_row = crosses.iloc[-1]
         bars_ago = len(df) - 1 - crosses.index[-1]
@@ -158,10 +418,10 @@ def get_last_crossover_details(df):
         return round(last_cross_row['VWMA_9'], 2), c_type, int(bars_ago)
     return 0.0, "No Cross", 0
 
-# --- DATA COMPILER ---
+# ─── DATA COMPILER ─────────────────────────────────────────────────────────────
 def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
     scan_results = []
-    
+
     def worker(row):
         symbol = str(row['Ticker']).strip()
         token = token_lookup.get(symbol)
@@ -169,15 +429,12 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
         try:
             hist_1d = kite.historical_data(token, from_date=(datetime.now() - timedelta(days=200)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="day")
             hist_15m = kite.historical_data(token, from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'), to_date=datetime.now().strftime('%Y-%m-%d'), interval="15minute")
-            
             if not hist_1d or not hist_15m: return None
-            
+
             df_1d = calculate_indicators(pd.DataFrame(hist_1d))
             df_15m = calculate_indicators(pd.DataFrame(hist_15m))
-            
-            # Anchor calculations from standard previous daily session to match Kite
             p_val, r1_val, s1_val = calculate_session_pivots(df_1d)
-            
+
             timeframes = {"15M": df_15m, "1D": df_1d}
             stock_data = {
                 "Stock Name": symbol,
@@ -189,56 +446,47 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 "ROCE": row.get("ROCE", 0.0),
                 "LTP": round(float(df_15m.iloc[-1]['close']), 2)
             }
-            
+
             for tf_suffix, df_tf in timeframes.items():
                 latest = df_tf.iloc[-1]
                 ltp = round(float(latest['close']), 2)
                 v9 = float(latest['VWMA_9'])
                 v26 = float(latest['VWMA_26'])
                 rsi = float(latest['RSI'])
-                
                 cross_val, cross_type, periods_ago = get_last_crossover_details(df_tf)
-                
+
                 signal = "⚪ NEUTRAL"
                 target_val = 0.0
                 sl_val = 0.0
-                
-                # --- MARKET REGIME EXECUTION ENGINE ---
+
                 if india_vix < 15.0:
-                    # TRENDING CONDITIONS
                     if ltp > (1.01 * v9) and v9 > v26:
                         signal = "🟢 BUY"
                         target_val = round(ltp * 1.015, 2)
-                        sl_val = round(ltp * 0.99, 2)      # Maining strict 1.5:1 ratio layout
+                        sl_val = round(ltp * 0.99, 2)
                     elif ltp < (0.99 * v9) and v9 < v26:
                         signal = "🔴 SELL"
                         target_val = round(ltp * 0.985, 2)
                         sl_val = round(ltp * 1.01, 2)
                 else:
-                    # SIDEWAYS / VOLATILE CONDITIONS (Pivots Match Kite Indicators)
                     mid_r1_p = (r1_val + p_val) / 2.0
                     mid_s1_p = (s1_val + p_val) / 2.0
-                    
                     is_bullish = ("Bullish" in cross_type or (v9 > v26)) and rsi > 50
                     is_bearish = ("Bearish" in cross_type or (v9 < v26)) and rsi < 50
-                    
                     if is_bullish:
-                        # Structural Filter Check: Price cannot be more than 50% between P and R1
                         if ltp <= mid_r1_p:
                             signal = "🟢 BUY"
                             target_val = r1_val
                             target_dist = r1_val - ltp
-                            sl_val = round(ltp - (target_dist / 1.5), 2)  # Extrapolates 1.5:1 Risk-Reward Floor
+                            sl_val = round(ltp - (target_dist / 1.5), 2)
                     elif is_bearish:
-                        # Structural Filter Check: Price cannot be lower than 50% between P and S1
                         if ltp >= mid_s1_p:
                             signal = "🔴 SELL"
                             target_val = s1_val
                             target_dist = ltp - s1_val
-                            sl_val = round(ltp + (target_dist / 1.5), 2)  # Extrapolates 1.5:1 Risk-Reward Ceiling
-                
+                            sl_val = round(ltp + (target_dist / 1.5), 2)
+
                 within_cross = "🎯 YES" if (cross_val * 0.99) <= ltp <= (cross_val * 1.01) else "No"
-                
                 stock_data.update({
                     f"Action Signal ({tf_suffix})": signal,
                     f"Target ({tf_suffix})": target_val,
@@ -249,7 +497,6 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                     f"Within 1% of Cross ({tf_suffix})": within_cross,
                     f"P / R1 / S1 ({tf_suffix})": f"{p_val} | {r1_val} | {s1_val}"
                 })
-                
             return stock_data
         except Exception:
             return None
@@ -259,41 +506,82 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
         for future in as_completed(futures):
             res = future.result()
             if res: scan_results.append(res)
-                
     return scan_results
 
-# --- INTERACTIVE DASHBOARD VIEW ---
+# ─── DASHBOARD ─────────────────────────────────────────────────────────────────
 def run_integrated_pipeline():
     meta_df = load_metadata()
     if meta_df is None or meta_df.empty: return
-        
+
     kite = get_kite()
     token_lookup = get_instrument_lookup()
     india_vix = fetch_india_vix(kite)
-    
-    vix_color = "🟢" if india_vix < 15.0 else "🟠"
-    regime_str = "**TRENDING METRICS** (VIX < 15)" if india_vix < 15.0 else "**KITE PIVOT STRUCTURE** (VIX ≥ 15)"
-    
-    st.sidebar.markdown("### 🛠️ Live Volatility Guard")
-    st.sidebar.markdown(f"**India VIX LTP:** {vix_color} `{india_vix}`")
-    st.sidebar.markdown(f"**Active Ruleset:** {regime_str}")
-    st.sidebar.markdown("🔒 *Enforced Target-to-StopLoss Ratio: 1.5 : 1*")
-    
+
+    vix_color = "#00E5A0" if india_vix < 15.0 else "#F5A623"
+    regime_label = "TRENDING (VIX < 15)" if india_vix < 15.0 else "PIVOT STRUCTURE (VIX ≥ 15)"
+
+    # ── Sidebar ──
+    st.sidebar.markdown("""
+    <div style="padding:0.8rem 0 0.4rem; font-family:'Space Grotesk',sans-serif; font-size:0.7rem;
+                letter-spacing:0.08em; text-transform:uppercase; color:#4A5A78;">
+        Volatility Guard
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.sidebar.markdown(f"""
+    <div style="
+        background:#10141C; border:1px solid #1F2A3C; border-radius:8px;
+        padding:0.9rem 1rem; margin-bottom:0.8rem;
+    ">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:0.72rem;
+                    color:#4A5A78; letter-spacing:0.06em; text-transform:uppercase;
+                    margin-bottom:4px;">India VIX</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:1.5rem;
+                    font-weight:500; color:{vix_color};">{india_vix}</div>
+    </div>
+    <div style="
+        background:#10141C; border:1px solid #1F2A3C; border-radius:8px;
+        padding:0.8rem 1rem; margin-bottom:0.8rem;
+    ">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:0.7rem;
+                    color:#4A5A78; letter-spacing:0.04em; text-transform:uppercase;
+                    margin-bottom:4px;">Active Ruleset</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:0.82rem;
+                    font-weight:600; color:#E8EDF5;">{regime_label}</div>
+    </div>
+    <div style="
+        background:#0D2045; border:1px solid #3B82F6; border-radius:6px;
+        padding:0.6rem 0.9rem; font-family:'Space Grotesk',sans-serif;
+        font-size:0.75rem; color:#3B82F6;
+    ">🔒 R:R Floor &nbsp;·&nbsp; <strong>1.5 : 1</strong></div>
+    """, unsafe_allow_html=True)
+
     if "master_df" not in st.session_state: st.session_state.master_df = None
     if "last_run" not in st.session_state: st.session_state.last_run = None
-        
+
     current_time = time.time()
-    should_scan = st.session_state.master_df is None or (st.session_state.last_run and (current_time - st.session_state.last_run) >= 900)
-        
+    should_scan = st.session_state.master_df is None or (
+        st.session_state.last_run and (current_time - st.session_state.last_run) >= 900
+    )
+
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
-        if st.button("🔄 Force Re-Scan Nifty 50", use_container_width=True): should_scan = True
+        if st.button("⟳  Re-Scan Nifty 50", use_container_width=True):
+            should_scan = True
     with c_btn2:
         if st.session_state.last_run:
-            st.write(f"⏱️ Matrix sync verified at: **{datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')}**")
-            
+            ts = datetime.fromtimestamp(st.session_state.last_run).strftime('%H:%M:%S')
+            st.markdown(f"""
+            <div style="display:flex; align-items:center; height:100%; padding-top:6px;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:0.75rem;
+                             color:#4A5A78;">Last sync &nbsp;</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:0.75rem;
+                             color:#8A9ABB;">{ts}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
     if should_scan:
-        with st.spinner("🚀 Syncing indicators to match live Kite terminal data..."):
+        with st.spinner("Syncing live data from Kite..."):
             results = execute_parallel_scan(meta_df, token_lookup, kite, india_vix)
             if results:
                 st.session_state.master_df = pd.DataFrame(results)
@@ -302,23 +590,33 @@ def run_integrated_pipeline():
 
     if st.session_state.master_df is None: return
     master_df = st.session_state.master_df
-    
-    tab1, tab2 = st.tabs(["📊 Technical Multi-Timeframe Scanner", "🏢 Structural Bifurcation View"])
-    
+
+    tab1, tab2 = st.tabs(["  📊  Technical Scanner  ", "  🏢  Valuation View  "])
+
     with tab1:
-        st.subheader("⚙️ Timeframe Filter Configurator")
-        active_tf = st.radio("Select Active Scanner Frame Layer:", ["15 Minute", "1 Day"], horizontal=True)
-        
+        active_tf = st.radio(
+            "Timeframe",
+            ["15 Minute", "1 Day"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        st.markdown("""<div style="font-family:'Space Grotesk',sans-serif; font-size:0.7rem;
+                    color:#4A5A78; letter-spacing:0.06em; text-transform:uppercase;
+                    margin-bottom:0.6rem;">Timeframe Layer</div>""", unsafe_allow_html=True)
+
         suffix = " (15M)" if active_tf == "15 Minute" else " (1D)"
         near_cross_col = f"Within 1% of Cross{suffix}"
         near_cross_df = master_df[master_df[near_cross_col] == "🎯 YES"]
-        
-        c1, c2 = st.columns(2)
-        c1.metric("Nifty 50 Inspected Assets", len(master_df))
-        c2.metric(f"Assets within 1% Value Border {suffix}", len(near_cross_df))
-        
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Stocks Scanned", len(master_df))
+        m2.metric(f"Near Crossover {suffix}", len(near_cross_df))
+        action_col = f"Action Signal ({suffix.strip()})"
+        active_signals = master_df[master_df[action_col].isin(["🟢 BUY", "🔴 SELL"])] if action_col in master_df.columns else pd.DataFrame()
+        m3.metric("Active Signals", len(active_signals))
+
         st.divider()
-        
+
         if active_tf == "15 Minute":
             tech_display_cols = [
                 "Stock Name", "Action Signal (15M)", "LTP", "Target (15M)", "StopLoss (15M)",
@@ -329,35 +627,52 @@ def run_integrated_pipeline():
                 "Stock Name", "Action Signal (1D)", "LTP", "Target (1D)", "StopLoss (1D)",
                 "Last Cross Value (1D)", "Last Cross Type (1D)", "Within 1% of Cross (1D)", "P / R1 / S1 (1D)"
             ]
-            
-        st.subheader(f"⚡ Actionable Structural Signals & Alerts ({active_tf})")
+
+        st.markdown(f"""<div style="font-family:'Space Grotesk',sans-serif; font-size:0.7rem;
+                    color:#4A5A78; letter-spacing:0.06em; text-transform:uppercase;
+                    margin-bottom:0.5rem;">⚡ Active Signals · {active_tf}</div>""", unsafe_allow_html=True)
+
         signals_df = master_df[master_df[tech_display_cols[1]].isin(["🟢 BUY", "🔴 SELL"])]
         if not signals_df.empty:
             st.dataframe(signals_df[tech_display_cols], use_container_width=True, hide_index=True)
         else:
-            st.info(f"No assets meet the current criteria under the {regime_str} structure.")
-            
-        st.subheader(f"📋 Complete Index Tracker Overview ({active_tf})")
-        st.dataframe(master_df[tech_display_cols].sort_values(by=tech_display_cols[1], ascending=True), use_container_width=True, hide_index=True)
+            st.info(f"No assets meet current signal criteria under the {regime_label} ruleset.")
+
+        st.markdown(f"""<div style="font-family:'Space Grotesk',sans-serif; font-size:0.7rem;
+                    color:#4A5A78; letter-spacing:0.06em; text-transform:uppercase;
+                    margin: 1.2rem 0 0.5rem;">📋 Full Index Overview · {active_tf}</div>""", unsafe_allow_html=True)
+
+        st.dataframe(
+            master_df[tech_display_cols].sort_values(by=tech_display_cols[1], ascending=True),
+            use_container_width=True, hide_index=True
+        )
 
     with tab2:
-        st.subheader("🔍 Valuation & Ownership Filter Matrix")
+        st.markdown("""<div style="font-family:'Space Grotesk',sans-serif; font-size:0.7rem;
+                    color:#4A5A78; letter-spacing:0.06em; text-transform:uppercase;
+                    margin-bottom:0.8rem;">Valuation & Ownership Filters</div>""", unsafe_allow_html=True)
+
         f_col1, f_col2 = st.columns(2)
         with f_col1:
-            selected_industry = st.selectbox("Sector Classification:", ["All Industries"] + sorted(list(master_df["Industry"].unique())))
+            selected_industry = st.selectbox("Sector", ["All Industries"] + sorted(list(master_df["Industry"].unique())))
         with f_col2:
-            selected_tier = st.selectbox("Insider Stake Strength:", ["All Tiers", "High (>50%)", "Medium (30%-50%)", "Low/Institutional (<30%)"])
-            
+            selected_tier = st.selectbox("Promoter Stake", ["All Tiers", "High (>50%)", "Medium (30%-50%)", "Low/Institutional (<30%)"])
+
         bifurcated_df = master_df.copy()
         if selected_industry != "All Industries":
             bifurcated_df = bifurcated_df[bifurcated_df["Industry"] == selected_industry]
         if selected_tier != "All Tiers":
-            master_df["Promoter Tier"] = master_df["Promoter Holding (%)"].apply(lambda x: "High (>50%)" if x >= 50.0 else ("Medium (30%-50%)" if x >= 30.0 else "Low/Institutional (<30%)"))
+            master_df["Promoter Tier"] = master_df["Promoter Holding (%)"].apply(
+                lambda x: "High (>50%)" if x >= 50.0 else ("Medium (30%-50%)" if x >= 30.0 else "Low/Institutional (<30%)")
+            )
             bifurcated_df = bifurcated_df[master_df["Promoter Tier"] == selected_tier]
-            
+
         display_cols = ["Stock Name", "Industry", "Promoter Holding (%)", "Stock PE", "Industry PE", "PB", "ROCE", "LTP"]
         if not bifurcated_df.empty:
-            st.dataframe(bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]), use_container_width=True, hide_index=True)
+            st.dataframe(
+                bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]),
+                use_container_width=True, hide_index=True
+            )
 
 if __name__ == "__main__":
     run_integrated_pipeline()
