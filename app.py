@@ -731,11 +731,6 @@ def run():
         "  🏢  Fundamentals  "
     ])
 
-    MODES = {
-        "intraday": ("intraday", "15M", "1D"),
-        "longterm": ("longterm", "1D",  "1M"),
-    }
-
     for tab, mode_key, label in [
         (tab_intra, "intraday", "Intraday · Short Swing"),
         (tab_swing, "intraday", "Short Swing Detail"),
@@ -745,11 +740,11 @@ def run():
             sess_key_df   = f"df_{mode_key}"
             sess_key_time = f"ts_{mode_key}"
 
-            if sess_key_df not in st.session_state:   st.session_state[sess_key_df]   = None
-            if sess_key_time not in st in st.session_state: st.session_state[sess_key_time] = None
+            if sess_key_df   not in st.session_state: st.session_state[sess_key_df]   = None
+            if sess_key_time not in st.session_state: st.session_state[sess_key_time] = None
 
-            current_t  = time.time()
-            stale      = (
+            current_t = time.time()
+            stale = (
                 st.session_state[sess_key_df] is None or
                 (st.session_state[sess_key_time] and current_t - st.session_state[sess_key_time] >= 900)
             )
@@ -761,9 +756,12 @@ def run():
             with c2:
                 if st.session_state[sess_key_time]:
                     ts = datetime.fromtimestamp(st.session_state[sess_key_time]).strftime('%H:%M:%S')
-                    st.markdown(f"""<div style="padding-top:6px;font-family:'JetBrains Mono',monospace;
-                        font-size:0.75rem;color:#4A5A78;">Last sync &nbsp;<span style="color:#8A9ABB;">{ts}</span></div>""",
-                        unsafe_allow_html=True)
+                    st.markdown(
+                        f"""<div style="padding-top:6px;font-family:'JetBrains Mono',monospace;
+                        font-size:0.75rem;color:#4A5A78;">Last sync &nbsp;
+                        <span style="color:#8A9ABB;">{ts}</span></div>""",
+                        unsafe_allow_html=True
+                    )
 
             if stale:
                 with st.spinner(f"Scanning {len(meta_df)} stocks ({label})..."):
@@ -774,58 +772,65 @@ def run():
                         st.rerun()
 
             df = st.session_state[sess_key_df]
+
             if df is None:
                 st.info("Click Scan to load data.")
-                continue
 
-            is_lt_tab = mode_key == "longterm"
-            tf1 = "1D" if is_lt_tab else "15M"
-            tf2 = "1M" if is_lt_tab else "1D"
-            vA  = "VWMA 50" if is_lt_tab else "VWMA 9"
-            vB  = "VWMA 100" if is_lt_tab else "VWMA 26"
-
-            active_tf = st.radio("Timeframe View", [tf1, tf2], horizontal=True, key=f"tf_{mode_key}_{label}")
-            sig_col   = f"Signal ({active_tf})"
-
-            # Metrics
-            if sig_col in df.columns:
-                buys    = (df[sig_col] == "🟢 BUY").sum()
-                sells   = (df[sig_col] == "🔴 SELL").sum()
-                m1,m2,m3,m4 = st.columns(4)
-                m1.metric("Stocks Scanned", len(df))
-                m2.metric("🟢 BUY Signals",  buys)
-                m3.metric("🔴 SELL Signals", sells)
-                m4.metric("⚪ Neutral",       len(df)-buys-sells)
-            st.divider()
-
-            # Display columns
-            base_cols = ["Stock", sig_col, "LTP",
-                         f"{vA} ({active_tf})", f"{vB} ({active_tf})",
-                         f"RSI ({active_tf})", f"RSI Smooth ({active_tf})",
-                         f"Vol > Vol MA ({active_tf})",
-                         f"Target ({active_tf})", f"StopLoss ({active_tf})",
-                         f"Cross ({active_tf})", f"Pivots ({active_tf})",
-                         "OI Call (ATM)", "OI Put (ATM)"]
-            disp_cols = [c for c in base_cols if c in df.columns]
-
-            # Active signals first
-            sig_df = df[df[sig_col].isin(["🟢 BUY","🔴 SELL"])] if sig_col in df.columns else pd.DataFrame()
-            if not sig_df.empty:
-                st.markdown(f"""<div style="font-family:'Space Grotesk',sans-serif;font-size:0.7rem;
-                    color:#4A5A78;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:0.5rem;">
-                    ⚡ Active Signals · {active_tf}</div>""", unsafe_allow_html=True)
-                st.dataframe(sig_df[disp_cols], use_container_width=True, hide_index=True)
-                st.divider()
             else:
-                st.info(f"No BUY/SELL signals on {active_tf} timeframe under current conditions.")
+                is_lt_tab = mode_key == "longterm"
+                tf1 = "1D" if is_lt_tab else "15M"
+                tf2 = "1M" if is_lt_tab else "1D"
+                vA  = "VWMA 50" if is_lt_tab else "VWMA 9"
+                vB  = "VWMA 100" if is_lt_tab else "VWMA 26"
 
-            st.markdown(f"""<div style="font-family:'Space Grotesk',sans-serif;font-size:0.7rem;
-                color:#4A5A78;letter-spacing:0.06em;text-transform:uppercase;margin:0.8rem 0 0.4rem;">
-                📋 Full Universe · {active_tf}</div>""", unsafe_allow_html=True)
-            st.dataframe(
-                df[disp_cols].sort_values(by=sig_col, ascending=True) if sig_col in df.columns else df[disp_cols],
-                use_container_width=True, hide_index=True
-            )
+                active_tf = st.radio("Timeframe View", [tf1, tf2], horizontal=True, key=f"tf_{mode_key}_{label}")
+                sig_col   = f"Signal ({active_tf})"
+
+                if sig_col in df.columns:
+                    buys  = (df[sig_col] == "🟢 BUY").sum()
+                    sells = (df[sig_col] == "🔴 SELL").sum()
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Stocks Scanned", len(df))
+                    m2.metric("🟢 BUY Signals",  buys)
+                    m3.metric("🔴 SELL Signals", sells)
+                    m4.metric("⚪ Neutral",       len(df) - buys - sells)
+                st.divider()
+
+                base_cols = [
+                    "Stock", sig_col, "LTP",
+                    f"{vA} ({active_tf})", f"{vB} ({active_tf})",
+                    f"RSI ({active_tf})", f"RSI Smooth ({active_tf})",
+                    f"Vol > Vol MA ({active_tf})",
+                    f"Target ({active_tf})", f"StopLoss ({active_tf})",
+                    f"Cross ({active_tf})", f"Pivots ({active_tf})",
+                    "OI Call (ATM)", "OI Put (ATM)"
+                ]
+                disp_cols = [c for c in base_cols if c in df.columns]
+
+                sig_df = df[df[sig_col].isin(["🟢 BUY", "🔴 SELL"])] if sig_col in df.columns else pd.DataFrame()
+                if not sig_df.empty:
+                    st.markdown(
+                        f"""<div style="font-family:'Space Grotesk',sans-serif;font-size:0.7rem;
+                        color:#4A5A78;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:0.5rem;">
+                        ⚡ Active Signals · {active_tf}</div>""",
+                        unsafe_allow_html=True
+                    )
+                    st.dataframe(sig_df[disp_cols], use_container_width=True, hide_index=True)
+                    st.divider()
+                else:
+                    st.info(f"No BUY/SELL signals on {active_tf} timeframe under current conditions.")
+
+                st.markdown(
+                    f"""<div style="font-family:'Space Grotesk',sans-serif;font-size:0.7rem;
+                    color:#4A5A78;letter-spacing:0.06em;text-transform:uppercase;margin:0.8rem 0 0.4rem;">
+                    📋 Full Universe · {active_tf}</div>""",
+                    unsafe_allow_html=True
+                )
+                sort_col = sig_col if sig_col in df.columns else disp_cols[0]
+                st.dataframe(
+                    df[disp_cols].sort_values(by=sort_col, ascending=True),
+                    use_container_width=True, hide_index=True
+                )
 
     # ── Fundamentals Tab ─────────────────────────────────────────────────────
     with tab_fund:
