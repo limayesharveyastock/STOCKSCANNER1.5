@@ -344,6 +344,36 @@ def execute_parallel_scan(meta_df, token_lookup, kite):
                 
     return scan_results
 
+def trading_signal_logic(df, india_vix):
+    latest = df.iloc[-1]
+    signals = []
+
+    # --- Trending Market Logic (IndiaVIX < 15) ---
+    if india_vix < 15:
+        if latest['close'] > 1.01 * latest['VWMA_9'] and latest['VWMA_9'] > latest['VWMA_26']:
+            target = latest['close'] * 1.015   # example 1.5% target
+            stoploss = latest['close'] * (1 - (1.015/1.5))  # maintain 1.5:1 ratio
+            signals.append({"Signal":"BUY","Target":round(target,2),"Stoploss":round(stoploss,2)})
+        elif latest['close'] < 0.99 * latest['VWMA_9'] and latest['VWMA_9'] < latest['VWMA_26']:
+            target = latest['close'] * 0.985   # example 1.5% target down
+            stoploss = latest['close'] * (1 + (0.015/1.5))
+            signals.append({"Signal":"SELL","Target":round(target,2),"Stoploss":round(stoploss,2)})
+
+    # --- Sideways/Volatile Market Logic (IndiaVIX ≥ 15) ---
+    else:
+        pivot = latest['Pivot']
+        r1 = latest['R1']
+        s1 = latest['S1']
+        price = latest['close']
+
+        # Check 50% condition
+        if price < (pivot + (r1 - pivot) * 0.5):  # below midpoint
+            signals.append({"Signal":"BUY","Target":round(r1,2),"Stoploss":round(s1,2)})
+        elif price > (pivot + (r1 - pivot) * 0.5):  # above midpoint
+            signals.append({"Signal":"SELL","Target":round(s1,2),"Stoploss":round(r1,2)})
+
+    return signals
+    
 @st.fragment(run_every="900s")
 def run_integrated_pipeline():
     meta_df = load_metadata()
