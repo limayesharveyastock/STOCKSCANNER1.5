@@ -876,17 +876,6 @@ if __name__ == "__main__":
     run()
 
 
-
-import streamlit as st
-import pandas as pd
-import pandas_ta as ta
-from datetime import datetime, timedelta
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from kiteconnect import KiteConnect
-
-st.set_page_config(layout="wide", page_title="NIFTY 500 Scanner", page_icon="📊")
-
 # ─── KITE INIT ────────────────────────────────────────────────────────────────
 @st.cache_resource
 def get_kite():
