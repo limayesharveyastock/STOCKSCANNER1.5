@@ -874,3 +874,171 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+
+
+import streamlit as st
+import pandas as pd
+import pandas_ta as ta
+from datetime import datetime, timedelta
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from kiteconnect import KiteConnect
+
+st.set_page_config(layout="wide", page_title="NIFTY 500 Scanner", page_icon="📊")
+
+# ─── KITE INIT ────────────────────────────────────────────────────────────────
+@st.cache_resource
+def get_kite():
+    kite = KiteConnect(api_key=st.secrets["api_key"], timeout=15)
+    kite.set_access_token(st.secrets["access_token"])
+    return kite
+
+@st.cache_data(ttl=86400)
+def get_instrument_lookup():
+    kite = get_kite()
+    try:
+        instruments = kite.instruments("NSE")
+        return {i['tradingsymbol']: str(i['instrument_token']) for i in instruments}
+    except Exception as e:
+        st.error(f"Instrument lookup failed: {e}")
+        return {}
+
+def fetch_india_vix(kite):
+    try:
+        return float(kite.ltp("NSE:INDIA VIX")["NSE:INDIA VIX"]["last_price"])
+    except Exception:
+        return 14.5
+
+# ─── INDICATOR CALCULATIONS ───────────────────────────────────────────────────
+def calculate_indicators(df, indicator_choice="VWMA"):
+    df['close'] = pd.to_numeric(df['close'])
+    df['high'] = pd.to_numeric(df['high'])
+    df['low'] = pd.to_numeric(df['low'])
+    df['volume'] = pd.to_numeric(df['volume'])
+
+    if indicator_choice == "VWMA":
+        df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
+        df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
+        df['RSI'] = ta.rsi(df['close'], length=14)
+        pivots = ta.pivots(df['high'], df['low'], df['close'], mode="fibonacci", lookback=20)
+        df = pd.concat([df, pivots], axis=1)
+
+    elif indicator_choice == "EMA":
+        df['EMA_9'] = ta.ema(df['close'], length=9)
+        df['EMA_26'] = ta.ema(df['close'], length=26)
+
+    elif indicator_choice == "Supertrend":
+        st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
+        df = pd.concat([df, st_data], axis=1)
+
+    elif indicator_choice == "Bollinger":
+        bbands = ta.bbands(df['close'], length=20, std=2)
+        df = pd.concat([df, bbands], axis=1)
+
+    return df
+
+def get_crossover_signal(df):
+    if len(df) < 3 or 'VWMA_9' not in df.columns:
+        return "No Cross"
+    latest, prev = df.iloc[-1], df.iloc[-2]
+    if prev['VWMA_9'] <= prev['VWMA_26'] and latest['VWMA_9'] > latest['VWMA_26']:
+        return "🔥 9 crosses 26 from below"
+    elif prev['VWMA_9'] >= prev['VWMA_26'] and latest['VWMA_9'] < latest['VWMA_26']:
+        return "❄️ 9 crosses 26 from above"
+    return "No Cross"
+
+# ─── TRADING SIGNAL LOGIC ─────────────────────────────────────────────────────
+def trading_signal_logic(latest, india_vix):
+    signals = []
+    price = latest['close']
+
+    if india_vix < 15 and 'VWMA_9' in latest and 'VWMA_26' in latest:  # Trending Market
+        if price > 1.01 * latest['VWMA_9'] and latest['VWMA_9'] > latest['VWMA_26']:
+            target = round(price * 1.015, 2)
+            stoploss = round(price - (target - price)/1.5, 2)
+            signals.append({"Signal":"BUY","Target":target,"Stoploss":stoploss})
+        elif price < 0.99 * latest['VWMA_9'] and latest['VWMA_9'] < latest['VWMA_26']:
+            target = round(price * 0.985, 2)
+            stoploss = round(price + (price - target)/1.5, 2)
+            signals.append({"Signal":"SELL","Target":target,"Stoploss":stoploss})
+
+    elif 'P' in latest and 'R1' in latest and 'S1' in latest:  # Sideways/Volatile Market
+        pivot, r1, s1 = latest['P'], latest['R1'], latest['S1']
+        midpoint = pivot + (r1 - pivot) * 0.5
+        if price < midpoint:
+            signals.append({"Signal":"BUY","Target":round(r1,2),"Stoploss":round(s1,2)})
+        elif price > midpoint:
+            signals.append({"Signal":"SELL","Target":round(s1,2),"Stoploss":round(r1,2)})
+
+    return signals
+
+# ─── SCANNER PIPELINE ─────────────────────────────────────────────────────────
+def run_scan(universe, token_lookup, kite, interval, indicator_choice):
+    india_vix = fetch_india_vix(kite)
+    results = []
+
+    def worker(symbol):
+        token = token_lookup.get(symbol)
+        if not token:
+            return None
+        try:
+            hist = kite.historical_data(
+                token,
+                from_date=(datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d'),
+                to_date=datetime.now().strftime('%Y-%m-%d'),
+                interval=interval
+            )
+            if not hist or len(hist) < 30:
+                return None
+
+            df = pd.DataFrame(hist)
+            df = calculate_indicators(df, indicator_choice)
+            latest = df.iloc[-1]
+
+            crossover = get_crossover_signal(df)
+            signals = trading_signal_logic(latest, india_vix)
+
+            return {
+                "Stock": symbol,
+                "Close": round(latest['close'],2),
+                "VWMA Cross": crossover,
+                "Signals": signals
+            }
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(worker, sym) for sym in universe]
+        for f in as_completed(futures):
+            res = f.result()
+            if res:
+                results.append(res)
+
+    return pd.DataFrame(results)
+
+# ─── STREAMLIT UI ─────────────────────────────────────────────────────────────
+st.title("📊 NIFTY 500 Multi-Timeframe Scanner")
+
+kite = get_kite()
+token_lookup = get_instrument_lookup()
+universe = list(token_lookup.keys())[:50]  # demo subset
+
+indicator_choice = st.selectbox("Choose Indicator Set", ["VWMA","EMA","Supertrend","Bollinger"])
+
+tab1, tab2, tab3 = st.tabs(["📈 Short Term (15m)", "📉 Mid Term (1D)", "📊 Long Term (1W)"])
+
+with tab1:
+    if st.button("Run Short Term Scan"):
+        df = run_scan(universe, token_lookup, kite, "15minute", indicator_choice)
+        st.dataframe(df)
+
+with tab2:
+    if st.button("Run Mid Term Scan"):
+        df = run_scan(universe, token_lookup, kite, "day", indicator_choice)
+        st.dataframe(df)
+
+with tab3:
+    if st.button("Run Long Term Scan"):
+        df = run_scan(universe, token_lookup, kite, "week", indicator_choice)
+        st.dataframe(df)
