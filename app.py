@@ -594,11 +594,9 @@ def execute_scan(meta_df, token_lookup, kite, india_vix, scanner_mode):
                 token,
                 from_date=(now - timedelta(days=400)).strftime('%Y-%m-%d'),
                 to_date=now.strftime('%Y-%m-%d'),
-                interval="day"
-            )
+                interval="day")
             if not hist_day: return None 
-                except Exception as e:
-    return None
+                except Exception as e: return None
 result = {
     "Stock Name": symbol,
     "Close": round(latest_15m['close'],2),
