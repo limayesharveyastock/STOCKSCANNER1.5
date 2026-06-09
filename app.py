@@ -407,6 +407,66 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 
     return scan_results
 
+def calculate_indicators(df):
+    df['close'] = pd.to_numeric(df['close'])
+    df['high'] = pd.to_numeric(df['high'])
+    df['low'] = pd.to_numeric(df['low'])
+    df['volume'] = pd.to_numeric(df['volume'])
+    
+    # Structural Core Indicators
+    df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
+    df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
+    df['RSI'] = ta.rsi(df['close'], length=14)
+    
+    # Pivot Points Calculation (Standard)
+    # Using the last 20 periods for calculation logic
+    df['Pivot'] = (df['high'].rolling(20).mean() + df['low'].rolling(20).mean() + df['close'].rolling(20).mean()) / 3
+    df['R1'] = df['Pivot'] + (0.382 * (df['high'].rolling(20).max() - df['low'].rolling(20).min()))
+    df['S1'] = df['Pivot'] - (0.382 * (df['high'].rolling(20).max() - df['low'].rolling(20).min()))
+    
+    st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
+    df = pd.concat([df, st_data], axis=1)
+    return df
+
+def trading_signal_logic(df, india_vix):
+    """
+    Applies logic: 1.5:1 Risk/Reward, VIX-based mode switching, and 50% midpoint filtering.
+    """
+    if len(df) < 20: return {"Signal": "HOLD", "Target": 0.0, "Stoploss": 0.0}
+    
+    latest = df.iloc[-1]
+    price = latest['close']
+    
+    # --- TRENDING MARKET (VIX < 15) ---
+    if india_vix < 15:
+        # Buy Logic
+        if price > (1.01 * latest['VWMA_9']) and latest['VWMA_9'] > latest['VWMA_26']:
+            target = price * 1.015
+            sl = price * (1 - (0.015 / 1.5))
+            return {"Signal": "🟢 BUY", "Target": round(target, 2), "Stoploss": round(sl, 2)}
+        # Sell Logic
+        elif price < (0.99 * latest['VWMA_9']) and latest['VWMA_9'] < latest['VWMA_26']:
+            target = price * 0.985
+            sl = price * (1 + (0.015 / 1.5))
+            return {"Signal": "🔴 SELL", "Target": round(target, 2), "Stoploss": round(sl, 2)}
+
+    # --- SIDEWAYS / VOLATILE MARKET (VIX >= 15) ---
+    else:
+        pivot, r1, s1 = latest['Pivot'], latest['R1'], latest['S1']
+        midpoint = pivot + ((r1 - pivot) * 0.5)
+        
+        # BUY: Price < 50% between R1 and P (Wait, logic adjusted per instruction)
+        # Instruction: "If price > 50% BETWEEN R1 AND P, do not send buy signal"
+        if price < midpoint: 
+            target, sl = r1, s1
+            return {"Signal": "🟢 BUY", "Target": round(target, 2), "Stoploss": round(sl, 2)}
+        # SELL: Price > 50% between R1 and P, do not send sell signal
+        elif price > midpoint:
+            target, sl = s1, r1
+            return {"Signal": "🔴 SELL", "Target": round(target, 2), "Stoploss": round(sl, 2)}
+
+    return {"Signal": "⚪ HOLD", "Target": 0.0, "Stoploss": 0.0}
+
 def run_integrated_pipeline():
     meta_df = load_metadata()
     if meta_df is None:
