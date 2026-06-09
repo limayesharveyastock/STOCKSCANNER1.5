@@ -7,7 +7,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from kiteconnect import KiteConnect
 
-st.set_page_config(layout="wide", page_title="NIFTY 50 Scanner", page_icon="📈")
+st.set_page_config(layout="wide", page_title="NIFTY 100 Scanner", page_icon="📈")
 
 # ─── GLOBAL THEME INJECTION ───────────────────────────────────────────────────
 st.markdown("""
@@ -265,7 +265,7 @@ st.markdown("""
             letter-spacing:-0.02em;
             color:#E8EDF5;
             line-height:1.2;
-        ">NIFTY 50 Blue-Chip Scanner</div>
+        ">NIFTY 100 Blue-Chip Scanner</div>
         <div style="
             font-family:'JetBrains Mono',monospace;
             font-size:0.7rem;
@@ -305,7 +305,7 @@ def fetch_india_vix(kite):
 
 def load_metadata():
     csv_path = "stock_metadata.csv"
-    nifty50_universe = {
+    nifty100_universe = {
         "ADANIENT": {"Industry": "Metals & Mining", "Promoter": 72.6, "PE": 45.2, "Ind_PE": 24.1, "PB": 4.2, "ROCE": 12.5},
         "ADANIPORTS": {"Industry": "Infrastructure / Services", "Promoter": 65.3, "PE": 33.1, "Ind_PE": 28.5, "PB": 3.9, "ROCE": 14.8},
         "APOLLOHOSP": {"Industry": "Healthcare", "Promoter": 29.3, "PE": 78.4, "Ind_PE": 38.2, "PB": 9.1, "ROCE": 16.2},
@@ -358,7 +358,74 @@ def load_metadata():
         "TRENT": {"Industry": "Retail", "Promoter": 37.0, "PE": 145.2, "Ind_PE": 68.4, "PB": 28.4, "ROCE": 24.3},
         "ULTRACEMCO": {"Industry": "Construction Materials", "Promoter": 60.0, "PE": 41.2, "Ind_PE": 32.1, "PB": 4.7, "ROCE": 13.8},
         "UPL": {"Industry": "Chemicals", "Promoter": 32.4, "PE": 22.1, "Ind_PE": 19.5, "PB": 1.5, "ROCE": 11.1},
-        "WIPRO": {"Industry": "Information Technology", "Promoter": 72.9, "PE": 23.4, "Ind_PE": 28.2, "PB": 3.4, "ROCE": 21.2}
+        "WIPRO": {"Industry": "Information Technology", "Promoter": 72.9, "PE": 23.4, "Ind_PE": 28.2, "PB": 3.4, "ROCE": 21.2},
+        # ── Nifty 100 additions ──────────────────────────────────────────────
+        "ABB": {"Industry": "Capital Goods", "Promoter": 75.0, "PE": 62.4, "Ind_PE": 35.4, "PB": 14.2, "ROCE": 28.6},
+        "ADANIGREEN": {"Industry": "Power", "Promoter": 56.3, "PE": 185.2, "Ind_PE": 19.4, "PB": 22.1, "ROCE": 8.4},
+        "ADANIPOWER": {"Industry": "Power", "Promoter": 74.2, "PE": 14.6, "Ind_PE": 19.4, "PB": 4.8, "ROCE": 22.1},
+        "AMBUJACEM": {"Industry": "Construction Materials", "Promoter": 63.2, "PE": 38.1, "Ind_PE": 32.1, "PB": 3.4, "ROCE": 10.2},
+        "ATGL": {"Industry": "Oil & Gas", "Promoter": 74.8, "PE": 68.4, "Ind_PE": 12.8, "PB": 8.9, "ROCE": 18.4},
+        "AUROPHARMA": {"Industry": "Healthcare", "Promoter": 51.8, "PE": 22.4, "Ind_PE": 31.4, "PB": 3.2, "ROCE": 19.5},
+        "BAJAJHLDNG": {"Industry": "Financial Services", "Promoter": 57.2, "PE": 18.4, "Ind_PE": 22.1, "PB": 2.8, "ROCE": 14.1},
+        "BANKBARODA": {"Industry": "Financial Services", "Promoter": 63.9, "PE": 6.8, "Ind_PE": 15.2, "PB": 1.1, "ROCE": 9.8},
+        "BERGEPAINT": {"Industry": "Consumer Durables", "Promoter": 74.9, "PE": 52.1, "Ind_PE": 51.2, "PB": 12.4, "ROCE": 28.9},
+        "BOSCHLTD": {"Industry": "Automobile", "Promoter": 70.5, "PE": 38.2, "Ind_PE": 26.4, "PB": 6.8, "ROCE": 22.4},
+        "CANBK": {"Industry": "Financial Services", "Promoter": 62.9, "PE": 7.2, "Ind_PE": 15.2, "PB": 1.0, "ROCE": 9.1},
+        "CHOLAFIN": {"Industry": "Financial Services", "Promoter": 51.4, "PE": 28.6, "Ind_PE": 22.1, "PB": 4.8, "ROCE": 16.2},
+        "COLPAL": {"Industry": "FMCG", "Promoter": 51.0, "PE": 48.6, "Ind_PE": 44.2, "PB": 18.4, "ROCE": 52.1},
+        "CUMMINSIND": {"Industry": "Capital Goods", "Promoter": 51.0, "PE": 44.2, "Ind_PE": 35.4, "PB": 9.8, "ROCE": 30.1},
+        "DABUR": {"Industry": "FMCG", "Promoter": 67.9, "PE": 46.2, "Ind_PE": 44.2, "PB": 9.6, "ROCE": 24.8},
+        "DLABLS": {"Industry": "Healthcare", "Promoter": 74.9, "PE": 46.8, "Ind_PE": 31.4, "PB": 7.2, "ROCE": 22.1},
+        "DLF": {"Industry": "Real Estate", "Promoter": 74.9, "PE": 52.4, "Ind_PE": 38.6, "PB": 4.2, "ROCE": 9.8},
+        "FEDERALBNK": {"Industry": "Financial Services", "Promoter": 0.0, "PE": 10.4, "Ind_PE": 15.2, "PB": 1.4, "ROCE": 11.2},
+        "GAIL": {"Industry": "Oil & Gas", "Promoter": 51.9, "PE": 12.4, "Ind_PE": 12.8, "PB": 1.6, "ROCE": 14.8},
+        "GODREJCP": {"Industry": "FMCG", "Promoter": 63.2, "PE": 42.6, "Ind_PE": 44.2, "PB": 8.4, "ROCE": 21.4},
+        "GODREJPROP": {"Industry": "Real Estate", "Promoter": 58.5, "PE": 68.4, "Ind_PE": 38.6, "PB": 5.8, "ROCE": 8.6},
+        "HAL": {"Industry": "Capital Goods", "Promoter": 71.6, "PE": 38.4, "Ind_PE": 35.4, "PB": 9.2, "ROCE": 28.4},
+        "HAVELLS": {"Industry": "Capital Goods", "Promoter": 59.6, "PE": 64.2, "Ind_PE": 35.4, "PB": 12.8, "ROCE": 24.6},
+        "HEROMOTOCO": {"Industry": "Automobile", "Promoter": 34.6, "PE": 20.4, "Ind_PE": 26.4, "PB": 5.2, "ROCE": 32.8},
+        "ICICIlombard": {"Industry": "Financial Services", "Promoter": 51.9, "PE": 38.2, "Ind_PE": 55.4, "PB": 6.4, "ROCE": 15.8},
+        "ICICIPRU": {"Industry": "Financial Services", "Promoter": 74.0, "PE": 72.4, "Ind_PE": 55.4, "PB": 8.2, "ROCE": 12.4},
+        "IDBI": {"Industry": "Financial Services", "Promoter": 94.7, "PE": 14.8, "Ind_PE": 15.2, "PB": 1.8, "ROCE": 10.4},
+        "IDFCFIRSTB": {"Industry": "Financial Services", "Promoter": 36.6, "PE": 22.4, "Ind_PE": 15.2, "PB": 1.6, "ROCE": 9.8},
+        "IGL": {"Industry": "Oil & Gas", "Promoter": 45.0, "PE": 22.8, "Ind_PE": 12.8, "PB": 4.2, "ROCE": 21.4},
+        "IOC": {"Industry": "Oil & Gas", "Promoter": 51.5, "PE": 6.8, "Ind_PE": 12.8, "PB": 1.0, "ROCE": 18.2},
+        "IRCTC": {"Industry": "Infrastructure / Services", "Promoter": 67.4, "PE": 48.6, "Ind_PE": 25.1, "PB": 14.8, "ROCE": 38.4},
+        "IRFC": {"Industry": "Financial Services", "Promoter": 86.4, "PE": 28.4, "Ind_PE": 22.1, "PB": 4.2, "ROCE": 6.8},
+        "LTIM": {"Industry": "Information Technology", "Promoter": 74.3, "PE": 34.6, "Ind_PE": 28.2, "PB": 8.4, "ROCE": 32.4},
+        "LTTS": {"Industry": "Information Technology", "Promoter": 74.2, "PE": 32.8, "Ind_PE": 28.2, "PB": 6.8, "ROCE": 28.6},
+        "LUPIN": {"Industry": "Healthcare", "Promoter": 47.0, "PE": 28.4, "Ind_PE": 31.4, "PB": 4.6, "ROCE": 18.4},
+        "MARICO": {"Industry": "FMCG", "Promoter": 59.4, "PE": 44.8, "Ind_PE": 44.2, "PB": 14.6, "ROCE": 42.8},
+        "MCDOWELL-N": {"Industry": "FMCG", "Promoter": 56.0, "PE": 62.4, "Ind_PE": 44.2, "PB": 8.4, "ROCE": 22.6},
+        "MOTHERSON": {"Industry": "Automobile", "Promoter": 58.3, "PE": 38.6, "Ind_PE": 26.4, "PB": 4.8, "ROCE": 14.2},
+        "MPHASIS": {"Industry": "Information Technology", "Promoter": 55.6, "PE": 28.4, "Ind_PE": 28.2, "PB": 5.8, "ROCE": 24.6},
+        "MRF": {"Industry": "Automobile", "Promoter": 27.8, "PE": 24.6, "Ind_PE": 26.4, "PB": 3.4, "ROCE": 16.8},
+        "MUTHOOTFIN": {"Industry": "Financial Services", "Promoter": 73.4, "PE": 18.4, "Ind_PE": 22.1, "PB": 3.6, "ROCE": 18.2},
+        "NMDC": {"Industry": "Metals & Mining", "Promoter": 60.8, "PE": 9.4, "Ind_PE": 18.4, "PB": 2.2, "ROCE": 28.4},
+        "NYKAA": {"Industry": "Retail", "Promoter": 52.6, "PE": 148.6, "Ind_PE": 68.4, "PB": 18.4, "ROCE": 8.6},
+        "OBEROIRLTY": {"Industry": "Real Estate", "Promoter": 67.7, "PE": 28.6, "Ind_PE": 38.6, "PB": 4.8, "ROCE": 18.4},
+        "OFSS": {"Industry": "Information Technology", "Promoter": 72.8, "PE": 32.4, "Ind_PE": 28.2, "PB": 8.6, "ROCE": 38.4},
+        "PAGEIND": {"Industry": "Consumer Durables", "Promoter": 59.0, "PE": 64.8, "Ind_PE": 51.2, "PB": 28.4, "ROCE": 58.6},
+        "PAYTM": {"Industry": "Financial Services", "Promoter": 19.4, "PE": 0.0, "Ind_PE": 22.1, "PB": 2.8, "ROCE": -4.2},
+        "PEL": {"Industry": "Financial Services", "Promoter": 43.8, "PE": 18.4, "Ind_PE": 22.1, "PB": 1.6, "ROCE": 8.4},
+        "PERSISTENT": {"Industry": "Information Technology", "Promoter": 31.1, "PE": 58.4, "Ind_PE": 28.2, "PB": 12.4, "ROCE": 28.6},
+        "PETRONET": {"Industry": "Oil & Gas", "Promoter": 50.0, "PE": 12.8, "Ind_PE": 12.8, "PB": 2.8, "ROCE": 24.6},
+        "PFC": {"Industry": "Financial Services", "Promoter": 55.9, "PE": 8.6, "Ind_PE": 22.1, "PB": 1.6, "ROCE": 8.2},
+        "PIDILITIND": {"Industry": "Chemicals", "Promoter": 70.7, "PE": 72.4, "Ind_PE": 19.5, "PB": 18.4, "ROCE": 32.4},
+        "PIIND": {"Industry": "Chemicals", "Promoter": 52.0, "PE": 28.6, "Ind_PE": 19.5, "PB": 4.8, "ROCE": 18.6},
+        "PNB": {"Industry": "Financial Services", "Promoter": 73.2, "PE": 8.4, "Ind_PE": 15.2, "PB": 0.9, "ROCE": 8.6},
+        "POLYCAB": {"Industry": "Capital Goods", "Promoter": 67.7, "PE": 42.6, "Ind_PE": 35.4, "PB": 8.4, "ROCE": 24.8},
+        "RECLTD": {"Industry": "Financial Services", "Promoter": 52.6, "PE": 9.2, "Ind_PE": 22.1, "PB": 1.8, "ROCE": 8.6},
+        "SIEMENS": {"Industry": "Capital Goods", "Promoter": 75.0, "PE": 72.8, "Ind_PE": 35.4, "PB": 14.8, "ROCE": 22.4},
+        "SRF": {"Industry": "Chemicals", "Promoter": 50.6, "PE": 38.4, "Ind_PE": 19.5, "PB": 5.8, "ROCE": 14.8},
+        "TORNTPHARM": {"Industry": "Healthcare", "Promoter": 71.3, "PE": 38.6, "Ind_PE": 31.4, "PB": 8.4, "ROCE": 22.4},
+        "TORNTPOWER": {"Industry": "Power", "Promoter": 72.8, "PE": 28.4, "Ind_PE": 19.4, "PB": 4.8, "ROCE": 14.6},
+        "TVSMOTOR": {"Industry": "Automobile", "Promoter": 57.4, "PE": 42.8, "Ind_PE": 26.4, "PB": 12.4, "ROCE": 26.8},
+        "UNIONBANK": {"Industry": "Financial Services", "Promoter": 74.8, "PE": 6.8, "Ind_PE": 15.2, "PB": 0.9, "ROCE": 8.8},
+        "VEDL": {"Industry": "Metals & Mining", "Promoter": 56.4, "PE": 12.4, "Ind_PE": 18.4, "PB": 2.8, "ROCE": 18.4},
+        "VOLTAS": {"Industry": "Capital Goods", "Promoter": 30.3, "PE": 68.4, "Ind_PE": 35.4, "PB": 8.6, "ROCE": 14.2},
+        "ZOMATO": {"Industry": "Infrastructure / Services", "Promoter": 0.0, "PE": 248.6, "Ind_PE": 25.1, "PB": 8.4, "ROCE": 4.2},
+        "ZYDUSLIFE": {"Industry": "Healthcare", "Promoter": 74.9, "PE": 28.4, "Ind_PE": 31.4, "PB": 4.8, "ROCE": 18.6},
     }
 
     if os.path.exists(csv_path):
@@ -371,7 +438,7 @@ def load_metadata():
                     "PE": "Stock_PE", "Industry PE": "Industry_PE", "Price to Book": "PB", "P/B": "PB"
                 }
                 df = df.rename(columns=rename_map)
-                df = df[df["Ticker"].isin(nifty50_universe.keys())]
+                df = df[df["Ticker"].isin(nifty100_universe.keys())]
                 return df
         except Exception as e:
             st.error(f"⚠️ CSV parsing error: {e}")
@@ -379,7 +446,7 @@ def load_metadata():
     fallback_data = [{
         "Ticker": ticker, "Industry": data["Industry"], "Promoter_Percent": data["Promoter"],
         "Stock_PE": data["PE"], "Industry_PE": data["Ind_PE"], "PB": data["PB"], "ROCE": data["ROCE"]
-    } for ticker, data in nifty50_universe.items()]
+    } for ticker, data in nifty100_universe.items()]
     return pd.DataFrame(fallback_data)
 
 # ─── TECHNICAL METRICS ENGINE ──────────────────────────────────────────────────
@@ -566,7 +633,7 @@ def run_integrated_pipeline():
 
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
-        if st.button("⟳  Re-Scan Nifty 50", use_container_width=True):
+        if st.button("⟳  Re-Scan Nifty 100", use_container_width=True):
             should_scan = True
     with c_btn2:
         if st.session_state.last_run:
