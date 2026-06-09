@@ -359,4 +359,41 @@ def run_integrated_pipeline():
             st.dataframe(bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]), use_container_width=True, hide_index=True)
 
 if __name__ == "__main__":
+    import streamlit as st
+import toml
+from kiteconnect import KiteConnect
+
+# 1. Setup the Connection
+def get_kite():
+    # Streamlit Cloud reads secrets from st.secrets, not a local file
+    try:
+        api_key = st.secrets["api_key"]
+        access_token = st.secrets["access_token"]
+        kite = KiteConnect(api_key=api_key)
+        kite.set_access_token(access_token)
+        return kite
+    except Exception as e:
+        st.error(f"Secret Error: {e}")
+        return None
+
+# 2. Main Logic
+st.title("Scanner (Market Closed Test)")
+kite = get_kite()
+
+if st.button("Force Rescan"):
+    if kite:
+        try:
+            # We fetch a known list to test connection
+            # We are NOT filtering by volume/price so it returns data even when closed
+            st.write("Fetching data for RELIANCE and TCS...")
+            data = kite.ltp(["NSE:RELIANCE", "NSE:TCS"])
+            
+            # Display the raw data to confirm connection
+            st.write("Connection Successful! Here is the data:")
+            st.json(data)
+            
+        except Exception as e:
+            st.error(f"Kite Error: {e}")
+    else:
+        st.error("Could not connect to Kite. Check your Secrets.")
     run_integrated_pipeline()
