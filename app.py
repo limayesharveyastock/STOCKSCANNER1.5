@@ -344,7 +344,7 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
             
-            time.sleep(0.35)  // Enforce strict compliance under Zerodha 3-req/sec limit
+            time.sleep(0.35)  # Enforce strict compliance under Zerodha 3-req/sec limit
             
             rsi_15m = latest_15m['RSI']
             vol_ma_15m = latest_15m['VOL_MA_20']  
