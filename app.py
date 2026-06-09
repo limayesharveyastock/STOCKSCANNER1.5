@@ -596,11 +596,7 @@ def execute_scan(meta_df, token_lookup, kite, india_vix, scanner_mode):
                 to_date=now.strftime('%Y-%m-%d'),
                 interval="day"
             )
-            if not hist_day: return None
-
-
-
-except Exception as e:
+            if not hist_day: return None except Exception as e:
     return None
 result = {
     "Stock Name": symbol,
