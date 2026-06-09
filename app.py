@@ -3,12 +3,14 @@ import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timedelta
 import time
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from kiteconnect import KiteConnect
+import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-# --- HIGH-CONTRAST BLACK TERMINAL STYLING ---
+# --- Styling ---
 st.markdown("""
 <style>
     .stApp { background-color: #000000; color: #E0E0E0; }
@@ -24,7 +26,7 @@ st.markdown("""
 
 st.title("🎯 NIFTY 50 Blue-Chip Multi-Timeframe Structural Scanner")
 
-# ✅ Token-aware Kite connection
+# --- KiteConnect initialization (patched) ---
 @st.cache_resource
 def get_kite(api_key: str, access_token: str):
     kite = KiteConnect(api_key=api_key, timeout=15)
@@ -42,7 +44,7 @@ def init_kite():
         return None
     return kite
 
-# ✅ Explicit Nifty 50 stock list
+# --- Explicit Nifty 50 stock list ---
 NIFTY50_STOCKS = [
     "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJAJ-AUTO","BAJFINANCE","BAJAJFINSV","BEL",
     "BHARTIARTL","BPCL","BRITANNIA","CIPLA","COALINDIA","DRREDDY","EICHERMOT","GRASIM","HCLTECH","HDFCBANK",
@@ -52,7 +54,7 @@ NIFTY50_STOCKS = [
     "ULTRACEMCO","UPL","WIPRO"
 ]
 
-# --- Indicator calculation ---
+# --- Indicator calculations ---
 def calculate_indicators(df):
     df['close'] = pd.to_numeric(df['close'])
     df['high'] = pd.to_numeric(df['high'])
@@ -96,50 +98,35 @@ def evaluate_trend(latest, last_cross_price, tf="15M"):
     else:
         return "⚪ NEUTRAL"
 
-# --- Scanner loop ---
-def execute_parallel_scan(kite, token_lookup):
-    results = []
-    def worker(symbol):
-        token = token_lookup.get(symbol)
-        if not token: return None
-        try:
-            hist_15m = kite.historical_data(
-                token,
-                from_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'),
-                to_date=datetime.now().strftime('%Y-%m-%d'),
-                interval="15minute"
-            )
-            if not hist_15m or len(hist_15m) < 110: return None
-            df_15m = calculate_indicators(pd.DataFrame(hist_15m))
-            latest_15m = df_15m.iloc[-1]
-            vwma_cross_signal = get_crossover_signal(df_15m)
-            above = df_15m['VWMA_9'] > df_15m['VWMA_26']
-            cross_mask = above != above.shift(); cross_mask.iloc[0] = False
-            cross_df = df_15m[cross_mask]
-            last_cross_price = float(cross_df['close'].iloc[-1]) if not cross_df.empty else float(latest_15m['close'])
-            trend = evaluate_trend(latest_15m, last_cross_price, tf="15M")
-            return {
-                "Stock": symbol,
-                "LTP": round(latest_15m['close'], 2),
-                "RSI": round(latest_15m['RSI'], 2),
-                "VWMA Cross": vwma_cross_signal,
-                "Last Cross Price": round(last_cross_price, 2),
-                "Trend": trend
-            }
-        except Exception: return None
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [executor.submit(worker, symbol) for symbol in NIFTY50_STOCKS]
-        for f in as_completed(futures):
-            res = f.result()
-            if res: results.append(res)
-    return pd.DataFrame(results)
-
-# --- Pipeline runner ---
-@st.fragment(run_every="900s")
-def run_integrated_pipeline():
-    kite = init_kite()
-    if kite is None:
-        st.warning("⚠️ Scanner halted due to invalid token.")
-        return
-    token_lookup = {inst['tradingsymbol']: str(inst['instrument_token']) for inst in kite.instruments("NSE")}
-    if "master_df
+# --- Chart plotting helper ---
+def plot_stock_chart(df, symbol):
+    fig = go.Figure(data=[go.Candlestick(
+        x=df.index,
+        open=df['open'],
+        high=df['high'],
+        low=df['low'],
+        close=df['close'],
+        name="Candles"
+    )])
+    # VWMA overlays
+    fig.add_trace(go.Scatter(x=df.index, y=df['VWMA_9'], line=dict(color='yellow', width=1), name="VWMA 9"))
+    fig.add_trace(go.Scatter(x=df.index, y=df['VWMA_26'], line=dict(color='orange', width=1), name="VWMA 26"))
+    fig.add_trace(go.Scatter(x=df.index, y=df['VWMA_50'], line=dict(color='cyan', width=1), name="VWMA 50"))
+    fig.add_trace(go.Scatter(x=df.index, y=df['VWMA_100'], line=dict(color='magenta', width=1), name="VWMA 100"))
+    # Mark crossover signals
+    cross_signal = get_crossover_signal(df)
+    if "BUY" in cross_signal:
+        fig.add_trace(go.Scatter(x=[df.index[-1]], y=[df['close'].iloc[-1]],
+            mode="markers+text", text="BUY", textposition="top center",
+            marker=dict(color="green", size=12, symbol="triangle-up"), name="Buy Signal"))
+    elif "SELL" in cross_signal:
+        fig.add_trace(go.Scatter(x=[df.index[-1]], y=[df['close'].iloc[-1]],
+            mode="markers+text", text="SELL", textposition="bottom center",
+            marker=dict(color="red", size=12, symbol="triangle-down"), name="Sell Signal"))
+    # RSI subplot
+    fig.update_layout(
+        title=f"{symbol} Chart with VWMA & Signals",
+        xaxis_rangeslider_visible=False,
+        template="plotly_dark",
+        yaxis=dict(domain=[0.3, 1]),
+        yaxis2=dict(domain=[0
