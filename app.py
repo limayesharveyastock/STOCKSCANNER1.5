@@ -838,8 +838,11 @@ def run():
             color:#4A5A78;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:0.8rem;">
             Valuation & Ownership Filter</div>""", unsafe_allow_html=True)
 
-        # Try to use whichever scan has run
-        base_df = st.session_state.get("df_intraday") or st.session_state.get("df_longterm")
+        # Try to use whichever scan has run — must use 'is not None' to avoid pandas ValueError
+        _d1 = st.session_state.get("df_intraday")
+        _d2 = st.session_state.get("df_longterm")
+        base_df = _d1 if (_d1 is not None and not _d1.empty) else \
+                  (_d2 if (_d2 is not None and not _d2.empty) else None)
         if base_df is None:
             st.info("Run any scanner tab first to populate fundamentals.")
         else:
