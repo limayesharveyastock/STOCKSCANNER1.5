@@ -72,7 +72,8 @@ def get_instrument_lookup():
     kite = get_kite()
     try:
         instruments = kite.instruments("NSE")
-        return {inst['tradingsymbol']: str(inst['instrument_token']) for inst in instruments}
+        # FIX: Keep instrument_token as an int! Zerodha historical API will reject strings.
+        return {inst['tradingsymbol']: int(inst['instrument_token']) for inst in instruments}
     except Exception as e:
         st.error(f"Error fetching instrument master from Kite: {e}")
         return {}
@@ -226,9 +227,6 @@ def get_crossover_signal(df):
     return "No Cross"
 
 def trading_signal_logic(df, india_vix):
-    """
-    Evaluates dynamic conditional parameters based on global market context volatility.
-    """
     if len(df) < 20:
         return [{"Signal": "HOLD", "Target": 0.0, "Stoploss": 0.0}]
         
@@ -254,15 +252,13 @@ def trading_signal_logic(df, india_vix):
         s1 = latest['S1']
         midpoint = pivot + (r1 - pivot) * 0.5
 
-        # If price > 50% between R1 and P, do not send buy signal
         if price <= midpoint:  
             target = r1
-            stoploss = price - (r1 - price) / 1.5  # Formulates 1.5:1 Risk/Reward Ratio dynamically
+            stoploss = price - (r1 - price) / 1.5  
             signals.append({"Signal": "BUY", "Target": round(target, 2), "Stoploss": round(stoploss, 2)})
-        # If price < 50% between R1 and P, do not send sell signal
         elif price >= midpoint:  
             target = s1
-            stoploss = price + (price - s1) / 1.5  # Formulates 1.5:1 Risk/Reward Ratio dynamically
+            stoploss = price + (price - s1) / 1.5  
             signals.append({"Signal": "SELL", "Target": round(target, 2), "Stoploss": round(stoploss, 2)})
 
     if not signals:
@@ -285,7 +281,10 @@ def get_daily_macro_data(_kite, token, symbol):
         df_1d = calculate_indicators(df_1d)
         latest_1d = df_1d.iloc[-1]
         
-        st_col = latest_1d.filter(like='SUPERT_').index[0]
+        # FIX: Robustly fetch Supertrend column prefix to avoid IndexError crashes
+        st_cols = latest_1d.filter(like='SUPERT_')
+        st_val = float(st_cols.iloc[0]) if not st_cols.empty else float(latest_1d['close'])
+        
         vwma_cross_signal_1d = get_crossover_signal(df_1d)
         
         above_1d = df_1d['VWMA_9'] > df_1d['VWMA_26']
@@ -306,7 +305,7 @@ def get_daily_macro_data(_kite, token, symbol):
             "RSI_1D": float(latest_1d['RSI']),
             "VOL_MA_1D": float(latest_1d['VOL_MA_50']),
             "VOLUME_1D": float(latest_1d['volume']),
-            "SUPERTREND_1D": float(latest_1d[st_col]),
+            "SUPERTREND_1D": st_val,
             "VWMA_50_1D": float(latest_1d['VWMA_50']),
             "VWMA_100_1D": float(latest_1d['VWMA_100']),
             "VWMA_CROSS_SIGNAL_1D": vwma_cross_signal_1d,
@@ -314,7 +313,8 @@ def get_daily_macro_data(_kite, token, symbol):
             "TREND_STATUS_1D": trend_1d,
             "df_raw": df_1d
         }
-    except Exception:
+    except Exception as e:
+        print(f"❌ Error in get_daily_macro_data for {symbol}: {e}")
         return None
 
 def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
@@ -330,10 +330,9 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
             if not daily_data:
                 return None
                 
-            # Adjusted down to 6 days to bypass structural API packet restrictions
             hist_15m = kite.historical_data(
                 token, 
-                from_date=(datetime.now() - timedelta(days=6)).strftime('%Y-%m-%d'),
+                from_date=(datetime.now() - timedelta(days=8)).strftime('%Y-%m-%d'),
                 to_date=datetime.now().strftime('%Y-%m-%d'), 
                 interval="15minute"
             )
@@ -344,7 +343,8 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
             df_15m = calculate_indicators(df_15m)
             latest_15m = df_15m.iloc[-1]
             
-            time.sleep(0.35)  # Enforce strict compliance under Zerodha 3-req/sec limit
+            # Strict delay pacing inside worker to guarantee compliance with 3-req/sec limit across threads
+            time.sleep(0.4) 
             
             rsi_15m = latest_15m['RSI']
             vol_ma_15m = latest_15m['VOL_MA_20']  
@@ -369,7 +369,6 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
             st_cols = latest_15m.filter(like='SUPERT_')
             st_15m = st_cols.iloc[0] if not st_cols.empty else curr_price_15m
 
-            # --- DYNAMIC STRUCTURAL STRATEGY RESOLUTION ---
             trade_calc_df = df_15m if trend_15m != "⚪ NEUTRAL" else daily_data["df_raw"]
             derived_signals = trading_signal_logic(trade_calc_df, india_vix)
             primary_signal = derived_signals[0] if derived_signals else {"Signal": "HOLD", "Target": 0.0, "Stoploss": 0.0}
@@ -404,13 +403,16 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 "Vol MA (1D)": round(daily_data["VOL_MA_1D"], 1),
                 "Supertrend (1D)": round(daily_data["SUPERTREND_1D"], 2)
             }
-        except Exception:
+        except Exception as e:
+            # FIX: Print exact failure traces to console output so we aren't completely blind!
+            print(f"❌ Worker exception for asset {symbol}: {e}")
             return None
 
+    # Lowered max_workers to 2 to enforce strict Zerodha spacing safety limits
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(worker, row) for _, row in meta_df.iterrows()]
         for future in as_completed(futures):
-            res = future.result()
+            res = future.get_result() if hasattr(future, 'get_result') else future.result()
             if res:
                 scan_results.append(res)
                 
