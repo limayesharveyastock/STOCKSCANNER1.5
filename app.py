@@ -544,22 +544,24 @@ def fetch_option_chain(kite, symbol, ltp, token_lookup):
         # Kite accepts max 500 instruments; we're well within that
         quotes = kite.quote([f"NFO:{t}" for t in all_tokens])  # keyed by "NFO:token"
 
-        # Map token -> OI
-        def get_oi(token_dict):
-            best_strike, best_oi = None, -1
+        # Map token -> OI and last_price
+        def get_best(token_dict, opt_type):
+            best_strike, best_oi, best_ltp = None, -1, 0.0
             for tok, strike in token_dict.items():
                 key = f"NFO:{tok}"
-                oi = quotes.get(key, {}).get("oi", 0) or 0
+                q = quotes.get(key, {})
+                oi  = q.get("oi", 0) or 0
+                lp  = q.get("last_price", 0.0) or 0.0
                 if oi > best_oi:
-                    best_oi, best_strike = oi, strike
-            return best_strike, best_oi
+                    best_oi, best_strike, best_ltp = oi, strike, lp
+            return best_strike, best_oi, best_ltp
 
-        ce_strike, ce_oi = get_oi(ce_tokens)
-        pe_strike, pe_oi = get_oi(pe_tokens)
+        ce_strike, ce_oi, ce_ltp = get_best(ce_tokens, "CE")
+        pe_strike, pe_oi, pe_ltp = get_best(pe_tokens, "PE")
 
         exp_str = nearest_exp.strftime("%d%b%y").upper() if hasattr(nearest_exp, 'strftime') else str(nearest_exp)
-        ce_str = f"{int(ce_strike)} CE — OI {int(ce_oi):,} ({exp_str})" if ce_strike else "NA"
-        pe_str = f"{int(pe_strike)} PE — OI {int(pe_oi):,} ({exp_str})" if pe_strike else "NA"
+        ce_str = f"{int(ce_strike)} CE ₹{ce_ltp:.2f} | OI {int(ce_oi):,} ({exp_str})" if ce_strike else "NA"
+        pe_str = f"{int(pe_strike)} PE ₹{pe_ltp:.2f} | OI {int(pe_oi):,} ({exp_str})" if pe_strike else "NA"
         return ce_str, pe_str
     except Exception:
         return "NA", "NA"
@@ -611,27 +613,30 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 target_val = 0.0
                 sl_val = 0.0
 
-                # ── New RSI + VWMA Crossover Proximity Rules ──────────────────
-                # BUY:  RSI > 60  AND price within ±1% of the VWMA9/26 crossover value
-                # SELL: RSI < 30  AND price within ±1% of the VWMA9/26 crossover value
-                # NEUTRAL if either condition fails
-                near_cross_buy  = cross_val > 0 and (cross_val * 0.99) <= ltp <= (cross_val * 1.01)
-                near_cross_sell = cross_val > 0 and (cross_val * 0.99) <= ltp <= (cross_val * 1.01)
+                # ── Signal Logic ─────────────────────────────────────────────
+                # Proximity check: price within ±1% of BOTH live VWMA9 and VWMA26
+                # (using live levels, not the historical cross point — more reliable)
+                near_v9  = (v9  * 0.99) <= ltp <= (v9  * 1.01)
+                near_v26 = (v26 * 0.99) <= ltp <= (v26 * 1.01)
+                near_both_vwmas = near_v9 or near_v26   # within 1% of either MA
 
-                if rsi > 60 and near_cross_buy:
+                # BUY:  RSI > 60  AND price within ±1% of VWMA9 or VWMA26
+                # SELL: RSI < 30  AND price within ±1% of VWMA9 or VWMA26
+                # NEUTRAL: any condition fails
+                if rsi > 60 and near_both_vwmas:
                     signal = "🟢 BUY"
                     if india_vix < 15.0:
                         target_val = round(ltp * 1.015, 2)
-                        sl_val    = round(ltp * 0.99,  2)
+                        sl_val     = round(ltp * 0.99,  2)
                     else:
                         target_val = r1_val if r1_val > ltp else round(ltp * 1.015, 2)
                         target_dist = abs(target_val - ltp)
                         sl_val = round(ltp - (target_dist / 1.5), 2)
-                elif rsi < 30 and near_cross_sell:
+                elif rsi < 30 and near_both_vwmas:
                     signal = "🔴 SELL"
                     if india_vix < 15.0:
                         target_val = round(ltp * 0.985, 2)
-                        sl_val    = round(ltp * 1.01,  2)
+                        sl_val     = round(ltp * 1.01,  2)
                     else:
                         target_val = s1_val if s1_val < ltp else round(ltp * 0.985, 2)
                         target_dist = abs(ltp - target_val)
@@ -640,9 +645,11 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 within_cross = "🎯 YES" if (cross_val * 0.99) <= ltp <= (cross_val * 1.01) else "No"
                 stock_data.update({
                     f"Action Signal ({tf_suffix})": signal,
+                    f"VWMA 9 ({tf_suffix})": round(v9, 2),
+                    f"VWMA 26 ({tf_suffix})": round(v26, 2),
+                    f"RSI ({tf_suffix})": round(rsi, 2),
                     f"Target ({tf_suffix})": target_val,
                     f"StopLoss ({tf_suffix})": sl_val,
-                    f"RSI ({tf_suffix})": round(rsi, 2),
                     f"Last Cross Value ({tf_suffix})": cross_val,
                     f"Last Cross Type ({tf_suffix})": f"{cross_type} ({periods_ago} periods ago)",
                     f"Within 1% of Cross ({tf_suffix})": within_cross,
@@ -713,11 +720,11 @@ def run_integrated_pipeline():
         <div style="font-family:'Space Grotesk',sans-serif; font-size:0.76rem;
                     color:#00E5A0; margin-bottom:4px;">🟢 BUY</div>
         <div style="font-family:'Space Grotesk',sans-serif; font-size:0.73rem;
-                    color:#8A9ABB; margin-bottom:8px;">RSI &gt; 60 &amp; Price within ±1% of VWMA 9/26 cross</div>
+                    color:#8A9ABB; margin-bottom:8px;">RSI &gt; 60 &amp; Price within ±1% of VWMA 9 or VWMA 26</div>
         <div style="font-family:'Space Grotesk',sans-serif; font-size:0.76rem;
                     color:#FF4D6A; margin-bottom:4px;">🔴 SELL</div>
         <div style="font-family:'Space Grotesk',sans-serif; font-size:0.73rem;
-                    color:#8A9ABB;">RSI &lt; 30 &amp; Price within ±1% of VWMA 9/26 cross</div>
+                    color:#8A9ABB;">RSI &lt; 30 &amp; Price within ±1% of VWMA 9 or VWMA 26</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -785,7 +792,7 @@ def run_integrated_pipeline():
         if active_tf == "15 Minute":
             tech_display_cols = [
                 "Stock Name", "Action Signal (15M)", "LTP",
-                "RSI (15M)",
+                "VWMA 9 (15M)", "VWMA 26 (15M)", "RSI (15M)",
                 "Target (15M)", "StopLoss (15M)",
                 "Last Cross Value (15M)", "Last Cross Type (15M)", "Within 1% of Cross (15M)",
                 "P / R1 / S1 (15M)",
@@ -794,7 +801,7 @@ def run_integrated_pipeline():
         else:
             tech_display_cols = [
                 "Stock Name", "Action Signal (1D)", "LTP",
-                "RSI (1D)",
+                "VWMA 9 (1D)", "VWMA 26 (1D)", "RSI (1D)",
                 "Target (1D)", "StopLoss (1D)",
                 "Last Cross Value (1D)", "Last Cross Type (1D)", "Within 1% of Cross (1D)",
                 "P / R1 / S1 (1D)",
