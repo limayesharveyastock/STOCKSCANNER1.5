@@ -366,23 +366,73 @@ FNO_UNIVERSE = {
 # ─── INDICATORS ───────────────────────────────────────────────────────────────
 def calculate_indicators(df, mode="intraday"):
     """
-    mode='intraday'  → VWMA 9, 26  + RSI-14 + Smoothed RSI-14 + Vol MA 20
-    mode='longterm'  → VWMA 50, 100 + RSI-14 + Smoothed RSI-14 + Vol MA 50
+    mode='intraday'  → VWMA 9/26,  RSI-14, Smoothed RSI, Vol MA 20
+    mode='longterm'  → VWMA 50/100, RSI-14, Smoothed RSI, Vol MA 50
+    Both modes also compute: MACD, Bollinger %B, ADX, Supertrend, EMA 200
     """
-    for col in ['close','high','low','volume']:
-        df[col] = pd.to_numeric(df[col])
+    for col in ['close','high','low','volume','open']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['close','high','low','volume']).reset_index(drop=True)
 
     if mode == "intraday":
         df['VWMA_A'] = ta.vwma(df['close'], df['volume'], length=9)
         df['VWMA_B'] = ta.vwma(df['close'], df['volume'], length=26)
         df['VOL_MA'] = df['volume'].rolling(20).mean()
     else:
+        # Use shorter periods on monthly (each bar = 1 month, so 50/100 monthly = years of data)
+        # On daily for longterm: VWMA 50 & 100 are fine; ensure enough history is fetched
         df['VWMA_A'] = ta.vwma(df['close'], df['volume'], length=50)
         df['VWMA_B'] = ta.vwma(df['close'], df['volume'], length=100)
         df['VOL_MA'] = df['volume'].rolling(50).mean()
 
-    df['RSI']          = ta.rsi(df['close'], length=14)
-    df['RSI_SMOOTH']   = df['RSI'].ewm(span=14, adjust=False).mean()   # Smoothed RSI
+    # ── RSI ──
+    df['RSI']        = ta.rsi(df['close'], length=14)
+    df['RSI_SMOOTH'] = df['RSI'].ewm(span=14, adjust=False).mean()
+
+    # ── MACD (12,26,9) ──
+    macd_df = ta.macd(df['close'], fast=12, slow=26, signal=9)
+    if macd_df is not None and not macd_df.empty:
+        df['MACD']        = macd_df.iloc[:, 0]   # MACD line
+        df['MACD_SIGNAL'] = macd_df.iloc[:, 2]   # Signal line
+        df['MACD_HIST']   = macd_df.iloc[:, 1]   # Histogram
+    else:
+        df['MACD'] = df['MACD_SIGNAL'] = df['MACD_HIST'] = float('nan')
+
+    # ── Bollinger Bands %B (20, 2σ) ──
+    bb_df = ta.bbands(df['close'], length=20, std=2)
+    if bb_df is not None and not bb_df.empty:
+        bb_lower = bb_df.iloc[:, 0]
+        bb_upper = bb_df.iloc[:, 2]
+        df['BB_PCT'] = (df['close'] - bb_lower) / (bb_upper - bb_lower).replace(0, float('nan'))
+    else:
+        df['BB_PCT'] = float('nan')
+
+    # ── ADX (14) ──
+    adx_df = ta.adx(df['high'], df['low'], df['close'], length=14)
+    if adx_df is not None and not adx_df.empty:
+        df['ADX']   = adx_df.iloc[:, 0]   # ADX
+        df['DI_POS'] = adx_df.iloc[:, 1]  # +DI
+        df['DI_NEG'] = adx_df.iloc[:, 2]  # -DI
+    else:
+        df['ADX'] = df['DI_POS'] = df['DI_NEG'] = float('nan')
+
+    # ── Supertrend (10, 3.0) ──
+    st_df = ta.supertrend(df['high'], df['low'], df['close'], length=10, multiplier=3.0)
+    if st_df is not None and not st_df.empty:
+        # Direction column: 1 = bullish (price above supertrend), -1 = bearish
+        dir_cols = [c for c in st_df.columns if 'SUPERTd' in c]
+        val_cols = [c for c in st_df.columns if c.startswith('SUPERT_') and 'SUPERTd' not in c and 'SUPERTl' not in c and 'SUPERTs' not in c]
+        if dir_cols: df['ST_DIR'] = st_df[dir_cols[0]]
+        else: df['ST_DIR'] = float('nan')
+        if val_cols: df['ST_VAL'] = st_df[val_cols[0]]
+        else: df['ST_VAL'] = float('nan')
+    else:
+        df['ST_DIR'] = df['ST_VAL'] = float('nan')
+
+    # ── EMA 200 (trend filter) ──
+    df['EMA_200'] = ta.ema(df['close'], length=200)
+
     return df
 
 def get_fibonacci_pivots(df, mode="intraday"):
@@ -415,40 +465,6 @@ def get_crossover_details(df):
         return round(float(last['VWMA_A']), 2), ctype, int(bars_ago)
     return 0.0, "No Cross", 0
 
-
-def get_crossover_signal(df):
-    if len(df) < 3 or 'VWMA_9' not in df.columns:
-        return "No Cross"
-    latest, prev = df.iloc[-1], df.iloc[-2]
-    if prev['VWMA_9'] <= prev['VWMA_26'] and latest['VWMA_9'] > latest['VWMA_26']:
-        return "🔥 9 crosses 26 from below"
-    elif prev['VWMA_9'] >= prev['VWMA_26'] and latest['VWMA_9'] < latest['VWMA_26']:
-        return "❄️ 9 crosses 26 from above"
-    return "No Cross"
-
-def trading_signal_logic(latest, india_vix):
-    signals = []
-    price = latest['close']
-
-    if india_vix < 15 and 'VWMA_9' in latest and 'VWMA_26' in latest:  # Trending Market
-        if price > 1.01 * latest['VWMA_9'] and latest['VWMA_9'] > latest['VWMA_26']:
-            target = round(price * 1.015, 2)
-            stoploss = round(price - (target - price)/1.5, 2)
-            signals.append({"Signal":"BUY","Target":target,"Stoploss":stoploss})
-        elif price < 0.99 * latest['VWMA_9'] and latest['VWMA_9'] < latest['VWMA_26']:
-            target = round(price * 0.985, 2)
-            stoploss = round(price + (price - target)/1.5, 2)
-            signals.append({"Signal":"SELL","Target":target,"Stoploss":stoploss})
-
-    elif 'P' in latest and 'R1' in latest and 'S1' in latest:  # Sideways/Volatile Market
-        pivot, r1, s1 = latest['P'], latest['R1'], latest['S1']
-        midpoint = pivot + (r1 - pivot) * 0.5
-        if price < midpoint:
-            signals.append({"Signal":"BUY","Target":round(r1,2),"Stoploss":round(s1,2)})
-        elif price > midpoint:
-            signals.append({"Signal":"SELL","Target":round(s1,2),"Stoploss":round(r1,2)})
-
-    return signals
 # ─── OPTION CHAIN ─────────────────────────────────────────────────────────────
 def fetch_option_chain(kite, symbol, ltp, nfo_instruments):
     if symbol not in FNO_UNIVERSE:
@@ -587,24 +603,17 @@ def execute_scan(meta_df, token_lookup, kite, india_vix, scanner_mode):
         symbol = str(row['Ticker']).strip()
         token  = token_lookup.get(symbol)
         if not token: return None
-result = {
-    "Stock Name": symbol,
-    "Close": round(latest_15m['close'],2),
-    "VWMA Cross (15M)": get_crossover_signal(df_15m),
-    "Signals (15M)": signals,
-    # keep all your existing fields intact...
-}
-india_vix = fetch_india_vix(kite)
-signals = trading_signal_logic(latest_15m, india_vix)
+        try:
+            now = datetime.now()
+            # Fetch history
+            hist_day = kite.historical_data(
+                token,
+                from_date=(now - timedelta(days=400)).strftime('%Y-%m-%d'),
+                to_date=now.strftime('%Y-%m-%d'),
+                interval="day"
+            )
+            if not hist_day: return None
 
-result = {
-    "Stock Name": symbol,
-    "Close": round(latest_1d['close'],2),
-    "VWMA Cross (1d)": get_crossover_signal(df_1d),
-    "Signals (1d)": signals,
-    # keep all your existing fields intact...
-}
-            
             df_day = calculate_indicators(
                 pd.DataFrame(hist_day),
                 mode="longterm" if is_lt else "intraday"
@@ -915,178 +924,4 @@ def run():
 
 if __name__ == "__main__":
     run()
-
-
-# ─── KITE INIT ────────────────────────────────────────────────────────────────
-@st.cache_resource
-def get_kite():
-    kite = KiteConnect(api_key=st.secrets["api_key"], timeout=15)
-    kite.set_access_token(st.secrets["access_token"])
-    return kite
-
-@st.cache_data(ttl=86400)
-def get_instrument_lookup():
-    kite = get_kite()
-    try:
-        instruments = kite.instruments("NSE")
-        return {i['tradingsymbol']: str(i['instrument_token']) for i in instruments}
-    except Exception as e:
-        st.error(f"Instrument lookup failed: {e}")
-        return {}
-
-def fetch_india_vix(kite):
-    try:
-        return float(kite.ltp("NSE:INDIA VIX")["NSE:INDIA VIX"]["last_price"])
-    except Exception:
-        return 14.5
-
-# ─── INDICATOR CALCULATIONS ───────────────────────────────────────────────────
-def calculate_indicators(df, indicator_choice="VWMA"):
-    df['close'] = pd.to_numeric(df['close'])
-    df['high'] = pd.to_numeric(df['high'])
-    df['low'] = pd.to_numeric(df['low'])
-    df['volume'] = pd.to_numeric(df['volume'])
-
-    if indicator_choice == "VWMA":
-        df['VWMA_9'] = ta.vwma(df['close'], df['volume'], length=9)
-        df['VWMA_26'] = ta.vwma(df['close'], df['volume'], length=26)
-        df['RSI'] = ta.rsi(df['close'], length=14)
-        pivots = ta.pivots(df['high'], df['low'], df['close'], mode="fibonacci", lookback=20)
-        df = pd.concat([df, pivots], axis=1)
-
-    elif indicator_choice == "EMA":
-        df['EMA_9'] = ta.ema(df['close'], length=9)
-        df['EMA_26'] = ta.ema(df['close'], length=26)
-
-    elif indicator_choice == "Supertrend":
-        st_data = ta.supertrend(df['high'], df['low'], df['close'], length=7, multiplier=3)
-        df = pd.concat([df, st_data], axis=1)
-
-    elif indicator_choice == "Bollinger":
-        bbands = ta.bbands(df['close'], length=20, std=2)
-        df = pd.concat([df, bbands], axis=1)
-
-    return df
-
-def get_crossover_signal(df):
-    if len(df) < 3 or 'VWMA_9' not in df.columns:
-        return "No Cross"
-    latest, prev = df.iloc[-1], df.iloc[-2]
-    if prev['VWMA_9'] <= prev['VWMA_26'] and latest['VWMA_9'] > latest['VWMA_26']:
-        return "🔥 9 crosses 26 from below"
-    elif prev['VWMA_9'] >= prev['VWMA_26'] and latest['VWMA_9'] < latest['VWMA_26']:
-        return "❄️ 9 crosses 26 from above"
-    return "No Cross"
-
-# ─── TRADING SIGNAL LOGIC ─────────────────────────────────────────────────────
-def trading_signal_logic(latest, india_vix):
-    signals = []
-    price = latest['close']
-
-    if india_vix < 15 and 'VWMA_9' in latest and 'VWMA_26' in latest:  # Trending Market
-        if price > 1.01 * latest['VWMA_9'] and latest['VWMA_9'] > latest['VWMA_26']:
-            target = round(price * 1.015, 2)
-            stoploss = round(price - (target - price)/1.5, 2)
-            signals.append({"Signal":"BUY","Target":target,"Stoploss":stoploss})
-        elif price < 0.99 * latest['VWMA_9'] and latest['VWMA_9'] < latest['VWMA_26']:
-            target = round(price * 0.985, 2)
-            stoploss = round(price + (price - target)/1.5, 2)
-            signals.append({"Signal":"SELL","Target":target,"Stoploss":stoploss})
-
-    elif 'P' in latest and 'R1' in latest and 'S1' in latest:  # Sideways/Volatile Market
-        pivot, r1, s1 = latest['P'], latest['R1'], latest['S1']
-        midpoint = pivot + (r1 - pivot) * 0.5
-        if price < midpoint:
-            signals.append({"Signal":"BUY","Target":round(r1,2),"Stoploss":round(s1,2)})
-        elif price > midpoint:
-            signals.append({"Signal":"SELL","Target":round(s1,2),"Stoploss":round(r1,2)})
-
-    return signals
-
-# ─── SCANNER PIPELINE ─────────────────────────────────────────────────────────
-def run_scan(universe, token_lookup, kite, interval, indicator_choice):
-    india_vix = fetch_india_vix(kite)
-    results = []
-
-    def worker(symbol):
-        token = token_lookup.get(symbol)
-        if not token:
-            return None
-        try:
-            hist = kite.historical_data(
-                token,
-                from_date=(datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d'),
-                to_date=datetime.now().strftime('%Y-%m-%d'),
-                interval=interval
-            )
-            if not hist or len(hist) < 30:
-                return None
-
-            df = pd.DataFrame(hist)
-            df = calculate_indicators(df, indicator_choice)
-            latest = df.iloc[-1]
-
-            crossover = get_crossover_signal(df)
-            signals = trading_signal_logic(latest, india_vix)
-
-            return {
-                "Stock": symbol,
-                "Close": round(latest['close'],2),
-                "VWMA Cross": crossover,
-                "Signals": signals
-            }
-        except Exception:
-            return None
-
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(worker, sym) for sym in universe]
-        for f in as_completed(futures):
-            res = f.result()
-            if res:
-                results.append(res)
-
-    return pd.DataFrame(results)
-
-# ─── STREAMLIT UI ─────────────────────────────────────────────────────────────
-st.title("📊 NIFTY 500 Multi-Timeframe Scanner")
-
-kite = get_kite()
-token_lookup = get_instrument_lookup()
-universe = list(token_lookup.keys())[:50]  # demo subset
-
-indicator_choice = st.selectbox("Choose Indicator Set", ["VWMA","EMA","Supertrend","Bollinger"])
-
-tab1, tab2, tab3 = st.tabs(["📈 Short Term (15m)", "📉 Mid Term (1D)", "📊 Long Term (1W)"])
-
-with tab1:
-    if st.button("Run Short Term Scan"):
-        df = run_scan(universe, token_lookup, kite, "15minute", indicator_choice)
-        st.dataframe(df)
-
-with tab2:
-    if st.button("Run Mid Term Scan"):
-        df = run_scan(universe, token_lookup, kite, "day", indicator_choice)
-        st.dataframe(df)
-
-with tab3:
-    if st.button("Run Long Term Scan"):
-        df = run_scan(universe, token_lookup, kite, "week", indicator_choice)
-        st.dataframe(df)
-indicator_choice = st.selectbox("Choose Indicator Set", ["VWMA","EMA","Supertrend","Bollinger"])
-
-tab1, tab2, tab3 = st.tabs(["📈 Short Term (15m)", "📉 Mid Term (1D)", "📊 Long Term (1W)"])
-
-with tab1:
-    if st.button("Run Short Term Scan"):
-        df = execute_parallel_scan(universe, token_lookup, kite, interval="15minute", indicator_choice=indicator_choice)
-        st.dataframe(df)
-
-with tab2:
-    if st.button("Run Mid Term Scan"):
-        df = execute_parallel_scan(universe, token_lookup, kite, interval="day", indicator_choice=indicator_choice)
-        st.dataframe(df)
-
-with tab3:
-    if st.button("Run Long Term Scan"):
-        df = execute_parallel_scan(universe, token_lookup, kite, interval="week", indicator_choice=indicator_choice)
-        st.dataframe(df)
+    
