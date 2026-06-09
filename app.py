@@ -485,6 +485,86 @@ def get_last_crossover_details(df):
         return round(last_cross_row['VWMA_9'], 2), c_type, int(bars_ago)
     return 0.0, "No Cross", 0
 
+# ─── OPTION CHAIN FETCHER ──────────────────────────────────────────────────────
+# Stocks in Nifty 100 that have liquid F&O contracts on NSE
+FNO_UNIVERSE = {
+    "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJAJ-AUTO",
+    "BAJFINANCE","BAJAJFINSV","BEL","BHARTIARTL","BPCL","BRITANNIA","CIPLA",
+    "COALINDIA","DRREDDY","EICHERMOT","GRASIM","HCLTECH","HDFCBANK","HDFCLIFE",
+    "HINDALCO","HINDUNILVR","ICICIBANK","INDUSINDBK","INFY","INDIGO","ITC",
+    "JSWSTEEL","KOTAKBANK","LT","M&M","MARUTI","NESTLEIND","NTPC","ONGC",
+    "POWERGRID","RELIANCE","SBILIFE","SBIN","SHRIRAMFIN","SUNPHARMA","TATACONSUM",
+    "TATAMOTORS","TATASTEEL","TCS","TECHM","TITAN","TRENT","ULTRACEMCO","WIPRO",
+    "ABB","AMBUJACEM","AUROPHARMA","BANKBARODA","BOSCHLTD","CANBK","CHOLAFIN",
+    "COLPAL","CUMMINSIND","DABUR","DLF","FEDERALBNK","GAIL","GODREJCP",
+    "GODREJPROP","HAL","HAVELLS","HEROMOTOCO","IDFCFIRSTB","IGL","IOC","IRCTC",
+    "LTIM","LUPIN","MARICO","MOTHERSON","MPHASIS","MRF","MUTHOOTFIN","NMDC",
+    "OBEROIRLTY","OFSS","PAGEIND","PEL","PERSISTENT","PETRONET","PFC","PIDILITIND",
+    "PIIND","PNB","POLYCAB","RECLTD","SIEMENS","SRF","TORNTPHARM","TORNTPOWER",
+    "TVSMOTOR","UNIONBANK","VEDL","VOLTAS","ZYDUSLIFE","JIOFIN","MAXHEALTH",
+    "EICHERMOT","BERGEPAINT","BAJAJHLDNG","ATGL","ZOMATO","NYKAA",
+}
+
+def fetch_option_chain(kite, symbol, ltp, token_lookup):
+    """
+    Fetches the nearest-expiry option chain for a stock and returns
+    the highest-OI call and put strikes closest to spot (LTP).
+    Returns ('NA', 'NA') if the symbol has no F&O contract.
+    """
+    if symbol not in FNO_UNIVERSE:
+        return "NA", "NA"
+    try:
+        instruments = kite.instruments("NFO")
+        # Filter for this symbol's options expiring soonest
+        opts = [i for i in instruments
+                if i['name'] == symbol and i['instrument_type'] in ('CE', 'PE')]
+        if not opts:
+            return "NA", "NA"
+
+        # Pick nearest expiry
+        expiries = sorted(set(i['expiry'] for i in opts))
+        nearest_exp = expiries[0]
+        opts = [i for i in opts if i['expiry'] == nearest_exp]
+
+        # Get all unique strikes, pick the 5 closest above/below LTP for each side
+        strikes = sorted(set(i['strike'] for i in opts))
+        atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - ltp))
+        nearby_strikes = strikes[max(0, atm_idx - 4): atm_idx + 5]
+
+        ce_tokens = {str(i['instrument_token']): i['strike']
+                     for i in opts if i['instrument_type'] == 'CE' and i['strike'] in nearby_strikes}
+        pe_tokens = {str(i['instrument_token']): i['strike']
+                     for i in opts if i['instrument_type'] == 'PE' and i['strike'] in nearby_strikes}
+
+        if not ce_tokens or not pe_tokens:
+            return "NA", "NA"
+
+        # Batch LTP fetch for OI — Kite quote() returns OI
+        all_tokens = list(ce_tokens.keys()) + list(pe_tokens.keys())
+        # Kite accepts max 500 instruments; we're well within that
+        quotes = kite.quote([f"NFO:{t}" for t in all_tokens])  # keyed by "NFO:token"
+
+        # Map token -> OI
+        def get_oi(token_dict):
+            best_strike, best_oi = None, -1
+            for tok, strike in token_dict.items():
+                key = f"NFO:{tok}"
+                oi = quotes.get(key, {}).get("oi", 0) or 0
+                if oi > best_oi:
+                    best_oi, best_strike = oi, strike
+            return best_strike, best_oi
+
+        ce_strike, ce_oi = get_oi(ce_tokens)
+        pe_strike, pe_oi = get_oi(pe_tokens)
+
+        exp_str = nearest_exp.strftime("%d%b%y").upper() if hasattr(nearest_exp, 'strftime') else str(nearest_exp)
+        ce_str = f"{int(ce_strike)} CE — OI {int(ce_oi):,} ({exp_str})" if ce_strike else "NA"
+        pe_str = f"{int(pe_strike)} PE — OI {int(pe_oi):,} ({exp_str})" if pe_strike else "NA"
+        return ce_str, pe_str
+    except Exception:
+        return "NA", "NA"
+
+
 # ─── DATA COMPILER ─────────────────────────────────────────────────────────────
 def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
     scan_results = []
@@ -503,6 +583,9 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
             p_val, r1_val, s1_val = calculate_session_pivots(df_1d)
 
             timeframes = {"15M": df_15m, "1D": df_1d}
+            ltp_val = round(float(df_15m.iloc[-1]['close']), 2)
+            ce_oi_str, pe_oi_str = fetch_option_chain(kite, symbol, ltp_val, token_lookup)
+
             stock_data = {
                 "Stock Name": symbol,
                 "Industry": row.get("Industry", "Blue-Chip Core"),
@@ -511,7 +594,9 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 "Industry PE": row.get("Industry_PE", 0.0),
                 "PB": row.get("PB", 0.0),
                 "ROCE": row.get("ROCE", 0.0),
-                "LTP": round(float(df_15m.iloc[-1]['close']), 2)
+                "LTP": ltp_val,
+                "Highest OI Call (Near ATM)": ce_oi_str,
+                "Highest OI Put (Near ATM)": pe_oi_str,
             }
 
             for tf_suffix, df_tf in timeframes.items():
@@ -526,32 +611,31 @@ def execute_parallel_scan(meta_df, token_lookup, kite, india_vix):
                 target_val = 0.0
                 sl_val = 0.0
 
-                if india_vix < 15.0:
-                    if ltp > (1.01 * v9) and v9 > v26:
-                        signal = "🟢 BUY"
+                # ── New RSI + VWMA Crossover Proximity Rules ──────────────────
+                # BUY:  RSI > 60  AND price within ±1% of the VWMA9/26 crossover value
+                # SELL: RSI < 30  AND price within ±1% of the VWMA9/26 crossover value
+                # NEUTRAL if either condition fails
+                near_cross_buy  = cross_val > 0 and (cross_val * 0.99) <= ltp <= (cross_val * 1.01)
+                near_cross_sell = cross_val > 0 and (cross_val * 0.99) <= ltp <= (cross_val * 1.01)
+
+                if rsi > 60 and near_cross_buy:
+                    signal = "🟢 BUY"
+                    if india_vix < 15.0:
                         target_val = round(ltp * 1.015, 2)
-                        sl_val = round(ltp * 0.99, 2)
-                    elif ltp < (0.99 * v9) and v9 < v26:
-                        signal = "🔴 SELL"
+                        sl_val    = round(ltp * 0.99,  2)
+                    else:
+                        target_val = r1_val if r1_val > ltp else round(ltp * 1.015, 2)
+                        target_dist = abs(target_val - ltp)
+                        sl_val = round(ltp - (target_dist / 1.5), 2)
+                elif rsi < 30 and near_cross_sell:
+                    signal = "🔴 SELL"
+                    if india_vix < 15.0:
                         target_val = round(ltp * 0.985, 2)
-                        sl_val = round(ltp * 1.01, 2)
-                else:
-                    mid_r1_p = (r1_val + p_val) / 2.0
-                    mid_s1_p = (s1_val + p_val) / 2.0
-                    is_bullish = ("Bullish" in cross_type or (v9 > v26)) and rsi > 50
-                    is_bearish = ("Bearish" in cross_type or (v9 < v26)) and rsi < 50
-                    if is_bullish:
-                        if ltp <= mid_r1_p:
-                            signal = "🟢 BUY"
-                            target_val = r1_val
-                            target_dist = r1_val - ltp
-                            sl_val = round(ltp - (target_dist / 1.5), 2)
-                    elif is_bearish:
-                        if ltp >= mid_s1_p:
-                            signal = "🔴 SELL"
-                            target_val = s1_val
-                            target_dist = ltp - s1_val
-                            sl_val = round(ltp + (target_dist / 1.5), 2)
+                        sl_val    = round(ltp * 1.01,  2)
+                    else:
+                        target_val = s1_val if s1_val < ltp else round(ltp * 0.985, 2)
+                        target_dist = abs(ltp - target_val)
+                        sl_val = round(ltp + (target_dist / 1.5), 2)
 
                 within_cross = "🎯 YES" if (cross_val * 0.99) <= ltp <= (cross_val * 1.01) else "No"
                 stock_data.update({
@@ -621,6 +705,20 @@ def run_integrated_pipeline():
         padding:0.6rem 0.9rem; font-family:'Space Grotesk',sans-serif;
         font-size:0.75rem; color:#3B82F6;
     ">🔒 R:R Floor &nbsp;·&nbsp; <strong>1.5 : 1</strong></div>
+    <div style="margin-top:0.9rem; background:#10141C; border:1px solid #1F2A3C;
+                border-radius:8px; padding:0.8rem 1rem;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:0.68rem;
+                    color:#4A5A78; letter-spacing:0.06em; text-transform:uppercase;
+                    margin-bottom:6px;">Signal Conditions</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:0.76rem;
+                    color:#00E5A0; margin-bottom:4px;">🟢 BUY</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:0.73rem;
+                    color:#8A9ABB; margin-bottom:8px;">RSI &gt; 60 &amp; Price within ±1% of VWMA 9/26 cross</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:0.76rem;
+                    color:#FF4D6A; margin-bottom:4px;">🔴 SELL</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-size:0.73rem;
+                    color:#8A9ABB;">RSI &lt; 30 &amp; Price within ±1% of VWMA 9/26 cross</div>
+    </div>
     """, unsafe_allow_html=True)
 
     if "master_df" not in st.session_state: st.session_state.master_df = None
@@ -686,13 +784,21 @@ def run_integrated_pipeline():
 
         if active_tf == "15 Minute":
             tech_display_cols = [
-                "Stock Name", "Action Signal (15M)", "LTP", "Target (15M)", "StopLoss (15M)",
-                "Last Cross Value (15M)", "Last Cross Type (15M)", "Within 1% of Cross (15M)", "P / R1 / S1 (15M)"
+                "Stock Name", "Action Signal (15M)", "LTP",
+                "RSI (15M)",
+                "Target (15M)", "StopLoss (15M)",
+                "Last Cross Value (15M)", "Last Cross Type (15M)", "Within 1% of Cross (15M)",
+                "P / R1 / S1 (15M)",
+                "Highest OI Call (Near ATM)", "Highest OI Put (Near ATM)"
             ]
         else:
             tech_display_cols = [
-                "Stock Name", "Action Signal (1D)", "LTP", "Target (1D)", "StopLoss (1D)",
-                "Last Cross Value (1D)", "Last Cross Type (1D)", "Within 1% of Cross (1D)", "P / R1 / S1 (1D)"
+                "Stock Name", "Action Signal (1D)", "LTP",
+                "RSI (1D)",
+                "Target (1D)", "StopLoss (1D)",
+                "Last Cross Value (1D)", "Last Cross Type (1D)", "Within 1% of Cross (1D)",
+                "P / R1 / S1 (1D)",
+                "Highest OI Call (Near ATM)", "Highest OI Put (Near ATM)"
             ]
 
         st.markdown(f"""<div style="font-family:'Space Grotesk',sans-serif; font-size:0.7rem;
@@ -734,7 +840,8 @@ def run_integrated_pipeline():
             )
             bifurcated_df = bifurcated_df[master_df["Promoter Tier"] == selected_tier]
 
-        display_cols = ["Stock Name", "Industry", "Promoter Holding (%)", "Stock PE", "Industry PE", "PB", "ROCE", "LTP"]
+        display_cols = ["Stock Name", "Industry", "Promoter Holding (%)", "Stock PE", "Industry PE", "PB", "ROCE", "LTP",
+                        "Highest OI Call (Near ATM)", "Highest OI Put (Near ATM)"]
         if not bifurcated_df.empty:
             st.dataframe(
                 bifurcated_df[display_cols].sort_values(by=["Industry", "Promoter Holding (%)"], ascending=[True, False]),
