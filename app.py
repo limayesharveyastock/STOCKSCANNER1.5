@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/nifty100_scanner.py << 'ENDOFFILE'
 import streamlit as st
 import pandas as pd
 import pandas_ta as ta
@@ -703,5 +702,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-ENDOFFILE
-echo "Done"
