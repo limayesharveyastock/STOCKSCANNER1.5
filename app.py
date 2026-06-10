@@ -357,7 +357,22 @@ def compute_signal(ltp, va, vb, rsi, vol, vol_ma, cross_val, cross_type,
     return signal, target, sl
 
 # ─── METADATA LOADER ──────────────────────────────────────────────────────────
+import os
+
 def load_metadata():
+    csv_path = "stock_fundamentals.csv"
+    
+    # 1. If the live Screener file exists locally, parse it directly into the dashboard
+    if os.path.exists(csv_path):
+        try:
+            df = pd.read_csv(csv_path)
+            if not df.empty:
+                return df
+        except Exception as e:
+            st.error(f"⚠️ Layout mapping error processing CSV: {e}")
+
+    # 2. Fallback to reading your internal dictionary if the scraper hasn't run yet
+    st.warning("⚠️ Screener CSV data trace missing. Falling back to default records.")
     fallback = [{
         "Ticker": t, 
         "Industry": d["Industry"], 
@@ -366,7 +381,6 @@ def load_metadata():
         "Industry_PE": d["Ind_PE"], 
         "PB": d["PB"], 
         "ROCE": d["ROCE"],
-        # New Additions matched EXACTLY with your dictionary keys
         "Net Profit Margin (%) FY": d.get("NPM", 0),
         "Op Profit Growth 3Y Avg (%)": d.get("OpGr3Y", 0),
         "Sales Growth 3Y Avg (%)": d.get("SalesGr3Y", 0),
