@@ -357,13 +357,25 @@ def compute_signal(ltp, va, vb, rsi, vol, vol_ma, cross_val, cross_type,
     return signal, target, sl
 
 # ─── METADATA LOADER ──────────────────────────────────────────────────────────
+# ─── METADATA LOADER ──────────────────────────────────────────────────────────
 def load_metadata():
     fallback = [{
-        "Ticker": t, "Industry": d["Industry"], "Promoter_Percent": d["Promoter"],
-        "Stock_PE": d["PE"], "Industry_PE": d["Ind_PE"], "PB": d["PB"], "ROCE": d["ROCE"]
-    # Make sure the name below EXACTLY matches the dictionary name at the top of your file!
+        "Ticker": t, 
+        "Industry": d["Industry"], 
+        "Promoter_Percent": d["Promoter"],
+        "Stock_PE": d["PE"], 
+        "Industry_PE": d["Ind_PE"], 
+        "PB": d["PB"], 
+        "ROCE": d["ROCE"],
+        # New Additions
+        "Net Profit Margin (%) FY": d.get("NPM", 0),
+        "Op Profit Growth 3Y Avg (%)": d.get("OpGr3Y", 0),
+        "Sales Growth 3Y Avg (%)": d.get("SalesGr3Y", 0),
+        "ROE 3Y Avg (%)": d.get("ROE3Y", 0),
+        "ROCE 3Y Avg (%)": d.get("ROCE3Y", 0),
+        "Avg CFO 3Y (₹ Cr)": d.get("CFO3Y", 0)
     } for t, d in NIFTY100.items()] 
-    return pd.DataFrame(fallback)
+    return pd.DataFrame(fallback))
 # ─── SCANNER ──────────────────────────────────────────────────────────────────
 def execute_scan(meta_df, token_lookup, kite, mode):
     """
