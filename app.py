@@ -357,7 +357,6 @@ def compute_signal(ltp, va, vb, rsi, vol, vol_ma, cross_val, cross_type,
     return signal, target, sl
 
 # ─── METADATA LOADER ──────────────────────────────────────────────────────────
-# ─── METADATA LOADER ──────────────────────────────────────────────────────────
 def load_metadata():
     fallback = [{
         "Ticker": t, 
@@ -367,7 +366,7 @@ def load_metadata():
         "Industry_PE": d["Ind_PE"], 
         "PB": d["PB"], 
         "ROCE": d["ROCE"],
-        # New Additions
+        # New Additions matched EXACTLY with your dictionary keys
         "Net Profit Margin (%) FY": d.get("NPM", 0),
         "Op Profit Growth 3Y Avg (%)": d.get("OpGr3Y", 0),
         "Sales Growth 3Y Avg (%)": d.get("SalesGr3Y", 0),
