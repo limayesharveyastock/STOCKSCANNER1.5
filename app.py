@@ -357,22 +357,21 @@ def compute_signal(ltp, va, vb, rsi, vol, vol_ma, cross_val, cross_type,
     return signal, target, sl
 
 # ─── METADATA LOADER ──────────────────────────────────────────────────────────
-import os
-
+# ─── METADATA LOADER (FIXED FALLBACK KEYS) ────────────────────────────────────
 def load_metadata():
+    import os
     csv_path = "stock_fundamentals.csv"
     
-    # 1. If the live Screener file exists locally, parse it directly into the dashboard
+    # Check if scraped file exists
     if os.path.exists(csv_path):
         try:
             df = pd.read_csv(csv_path)
             if not df.empty:
                 return df
         except Exception as e:
-            st.error(f"⚠️ Layout mapping error processing CSV: {e}")
+            st.error(f"⚠️ Error reading CSV: {e}")
 
-    # 2. Fallback to reading your internal dictionary if the scraper hasn't run yet
-    st.warning("⚠️ Screener CSV data trace missing. Falling back to default records.")
+    # Fallback structure matching your exact dictionary key strings
     fallback = [{
         "Ticker": t, 
         "Industry": d["Industry"], 
@@ -382,8 +381,8 @@ def load_metadata():
         "PB": d["PB"], 
         "ROCE": d["ROCE"],
         "Net Profit Margin (%) FY": d.get("NPM", 0),
-        "Op Profit Growth 3Y Avg (%)": d.get("OpGr3Y", 0),
-        "Sales Growth 3Y Avg (%)": d.get("SalesGr3Y", 0),
+        "Op Profit Growth 3Y Avg (%)": d.get("OpProfGrowth3Y", 0),  # Matched exactly
+        "Sales Growth 3Y Avg (%)": d.get("SalesGrowth3Y", 0),      # Matched exactly
         "ROE 3Y Avg (%)": d.get("ROE3Y", 0),
         "ROCE 3Y Avg (%)": d.get("ROCE3Y", 0),
         "Avg CFO 3Y (₹ Cr)": d.get("CFO3Y", 0)
