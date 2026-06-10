@@ -356,34 +356,14 @@ def compute_signal(ltp, va, vb, rsi, vol, vol_ma, cross_val, cross_type,
 
     return signal, target, sl
 
-
-# ─── METADATA ─────────────────────────────────────────────────────────────────
-import os
-
+# ─── METADATA LOADER ──────────────────────────────────────────────────────────
 def load_metadata():
-    csv_path = "stock_fundamentals.csv"
-    
-    # 1. Try to load live fundamentals from CSV
-    if os.path.exists(csv_path):
-        try:
-            df = pd.read_csv(csv_path)
-            # Ensure the CSV has a 'Ticker' column
-            if not df.empty and "Ticker" in df.columns:
-                # Filter to only include stocks in your universe
-                df = df[df["Ticker"].isin(NIFTY100_UNIVERSE.keys())]
-                return df
-        except Exception as e:
-            st.error(f"⚠️ Error reading fundamentals CSV: {e}")
-
-    # 2. Fallback to static dictionary if CSV is missing
-    st.warning("⚠️ Live fundamentals CSV not found. Using static hardcoded fallback data.")
     fallback = [{
-        "Ticker": t, "Industry": d["Industry"], "Promoter_Percent": d.get("Promoter", 0),
-        "Stock_PE": d.get("PE", 0), "Industry_PE": d.get("Ind_PE", 0), "PB": d.get("PB", 0), "ROCE": d.get("ROCE", 0)
-    } for t, d in NIFTY100_UNIVERSE.items()]
+        "Ticker": t, "Industry": d["Industry"], "Promoter_Percent": d["Promoter"],
+        "Stock_PE": d["PE"], "Industry_PE": d["Ind_PE"], "PB": d["PB"], "ROCE": d["ROCE"]
+    # Make sure the name below EXACTLY matches the dictionary name at the top of your file!
+    } for t, d in NIFTY500_UNIVERSE.items()] 
     return pd.DataFrame(fallback)
-
-
 # ─── SCANNER ──────────────────────────────────────────────────────────────────
 def execute_scan(meta_df, token_lookup, kite, mode):
     """
