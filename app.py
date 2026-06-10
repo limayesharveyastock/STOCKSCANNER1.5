@@ -362,7 +362,7 @@ def load_metadata():
         "Ticker": t, "Industry": d["Industry"], "Promoter_Percent": d["Promoter"],
         "Stock_PE": d["PE"], "Industry_PE": d["Ind_PE"], "PB": d["PB"], "ROCE": d["ROCE"]
     # Make sure the name below EXACTLY matches the dictionary name at the top of your file!
-    } for t, d in NIFTY500_UNIVERSE.items()] 
+    } for t, d in NIFTY100.items()] 
     return pd.DataFrame(fallback)
 # ─── SCANNER ──────────────────────────────────────────────────────────────────
 def execute_scan(meta_df, token_lookup, kite, mode):
