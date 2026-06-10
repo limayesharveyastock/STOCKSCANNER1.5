@@ -375,7 +375,7 @@ def load_metadata():
         "ROCE 3Y Avg (%)": d.get("ROCE3Y", 0),
         "Avg CFO 3Y (₹ Cr)": d.get("CFO3Y", 0)
     } for t, d in NIFTY100.items()] 
-    return pd.DataFrame(fallback))
+    return pd.DataFrame(fallback)
 # ─── SCANNER ──────────────────────────────────────────────────────────────────
 def execute_scan(meta_df, token_lookup, kite, mode):
     """
