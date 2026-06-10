@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import pandas_ta as ta
+import numpy as np
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -222,18 +225,70 @@ def calculate_indicators(df, mode="intraday"):
             df[col] = pd.to_numeric(df[col], errors='coerce')
     df = df.dropna(subset=['close','high','low','volume']).reset_index(drop=True)
 
-    if mode == "intraday":
-        df['VWMA_A'] = ta.vwma(df['close'], df['volume'], length=9)
-        df['VWMA_B'] = ta.vwma(df['close'], df['volume'], length=26)
-        df['VOL_MA'] = df['volume'].rolling(20).mean()
-    else:
-        df['VWMA_A'] = ta.vwma(df['close'], df['volume'], length=50)
-        df['VWMA_B'] = ta.vwma(df['close'], df['volume'], length=100)
-        df['VOL_MA'] = df['volume'].rolling(20).mean()
+def _wma(series: pd.Series, length: int) -> pd.Series:
+    """Standard Weighted Moving Average."""
+    weights = np.arange(1, length + 1, dtype=float)
+    return series.rolling(length).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
 
+def _vwap_price(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """Volume-weighted price series (rolling VWAP numerator normalised)."""
+    return (close * volume).cumsum() / volume.cumsum()
+
+def hvwma(close: pd.Series, volume: pd.Series, length: int) -> pd.Series:
+    """
+    Hull Volume-Weighted Moving Average (HVWMA):
+      1. Compute vw_price = close * volume / volume  (volume-weighted close proxy)
+      2. HMA formula: WMA(2*WMA(vw, n/2) - WMA(vw, n), sqrt(n))
+    Same responsiveness as HMA but anchored to volume-weighted price.
+    """
+    vw = close * volume / volume.replace(0, np.nan)   # volume-weighted close (normalised)
+    half  = max(int(length / 2), 1)
+    sqrtn = max(int(np.sqrt(length)), 1)
+    raw   = 2 * _wma(vw, half) - _wma(vw, length)
+    return _wma(raw, sqrtn)
+
+def calculate_indicators(df, mode="intraday"):
+    """
+    Intraday : HVWMA 9 / 26,  Vol MA 20
+    Med-Long : HVWMA 50 / 100, Vol MA 20
+    All      : RSI-14, Smoothed RSI, MACD, BB%B, ADX, Supertrend, EMA 200,
+               52W High/Low proximity
+    """
+    for col in ['close','high','low','volume','open']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['close','high','low','volume']).reset_index(drop=True)
+
+    if mode == "intraday":
+        df['HVWMA_A'] = hvwma(df['close'], df['volume'], 9)
+        df['HVWMA_B'] = hvwma(df['close'], df['volume'], 26)
+        df['VOL_MA']  = df['volume'].rolling(20).mean()
+    else:
+        df['HVWMA_A'] = hvwma(df['close'], df['volume'], 50)
+        df['HVWMA_B'] = hvwma(df['close'], df['volume'], 100)
+        df['VOL_MA']  = df['volume'].rolling(20).mean()
+
+    # ── RSI ──────────────────────────────────────────────────────────────────
     df['RSI']        = ta.rsi(df['close'], length=14)
     df['RSI_SMOOTH'] = df['RSI'].ewm(span=14, adjust=False).mean()
 
+    # ── RSI Divergence flag (last 5 bars) ───────────────────────────────────
+    # Bullish: price makes lower low but RSI makes higher low → hidden strength
+    # Bearish: price makes higher high but RSI makes lower high → weakness
+    def rsi_div(df, lookback=5):
+        flags = ['—'] * len(df)
+        for i in range(lookback, len(df)):
+            p_slice  = df['close'].iloc[i-lookback:i+1]
+            r_slice  = df['RSI'].iloc[i-lookback:i+1]
+            if pd.isna(r_slice).any(): continue
+            if p_slice.iloc[-1] < p_slice.min() and r_slice.iloc[-1] > r_slice.iloc[r_slice.argmin()]:
+                flags[i] = '🟢 Bull Div'
+            elif p_slice.iloc[-1] > p_slice.max() and r_slice.iloc[-1] < r_slice.iloc[r_slice.argmax()]:
+                flags[i] = '🔴 Bear Div'
+        return flags
+    df['RSI_DIV'] = rsi_div(df)
+
+    # ── MACD (12, 26, 9) ─────────────────────────────────────────────────────
     macd_df = ta.macd(df['close'], fast=12, slow=26, signal=9)
     if macd_df is not None and not macd_df.empty:
         df['MACD']        = macd_df.iloc[:, 0]
@@ -242,15 +297,17 @@ def calculate_indicators(df, mode="intraday"):
     else:
         df['MACD'] = df['MACD_SIGNAL'] = df['MACD_HIST'] = float('nan')
 
+    # ── Bollinger Bands %B ───────────────────────────────────────────────────
     bb_df = ta.bbands(df['close'], length=20, std=2)
     if bb_df is not None and not bb_df.empty:
         bb_lower = bb_df.iloc[:, 0]
         bb_upper = bb_df.iloc[:, 2]
-        denom = (bb_upper - bb_lower).replace(0, float('nan'))
+        denom    = (bb_upper - bb_lower).replace(0, float('nan'))
         df['BB_PCT'] = (df['close'] - bb_lower) / denom
     else:
         df['BB_PCT'] = float('nan')
 
+    # ── ADX (14) ─────────────────────────────────────────────────────────────
     adx_df = ta.adx(df['high'], df['low'], df['close'], length=14)
     if adx_df is not None and not adx_df.empty:
         df['ADX']    = adx_df.iloc[:, 0]
@@ -259,6 +316,7 @@ def calculate_indicators(df, mode="intraday"):
     else:
         df['ADX'] = df['DI_POS'] = df['DI_NEG'] = float('nan')
 
+    # ── Supertrend (10, 3.0) ─────────────────────────────────────────────────
     st_df = ta.supertrend(df['high'], df['low'], df['close'], length=10, multiplier=3.0)
     if st_df is not None and not st_df.empty:
         dir_cols = [c for c in st_df.columns if 'SUPERTd' in c]
@@ -269,7 +327,18 @@ def calculate_indicators(df, mode="intraday"):
     else:
         df['ST_DIR'] = df['ST_VAL'] = float('nan')
 
+    # ── EMA 200 ──────────────────────────────────────────────────────────────
     df['EMA_200'] = ta.ema(df['close'], length=200)
+
+    # ── 52-Week High / Low proximity (only meaningful on daily data) ─────────
+    if len(df) >= 252:
+        df['52W_HIGH'] = df['close'].rolling(252).max()
+        df['52W_LOW']  = df['close'].rolling(252).min()
+        rng = (df['52W_HIGH'] - df['52W_LOW']).replace(0, float('nan'))
+        df['52W_POS']  = ((df['close'] - df['52W_LOW']) / rng * 100).round(1)
+    else:
+        df['52W_HIGH'] = df['52W_LOW'] = df['52W_POS'] = float('nan')
+
     return df
 
 
@@ -289,15 +358,15 @@ def get_fibonacci_pivots(df):
 
 def get_crossover_details(df):
     if len(df) < 2: return 0.0, "No Cross", 0
-    d = df.copy().dropna(subset=['VWMA_A','VWMA_B']).reset_index(drop=True)
+    d = df.copy().dropna(subset=['HVWMA_A','HVWMA_B']).reset_index(drop=True)
     if len(d) < 2: return 0.0, "No Cross", 0
-    d['sign'] = (d['VWMA_A'] > d['VWMA_B']).astype(int)
+    d['sign'] = (d['HVWMA_A'] > d['HVWMA_B']).astype(int)
     crosses = d[d['sign'] != d['sign'].shift(1)].iloc[1:]
     if not crosses.empty:
         last     = crosses.iloc[-1]
         bars_ago = len(d) - 1 - crosses.index[-1]
-        ctype    = "🔥 Bullish" if last['VWMA_A'] > last['VWMA_B'] else "❄️ Bearish"
-        return round(float(last['VWMA_A']), 2), ctype, int(bars_ago)
+        ctype    = "🔥 Bullish" if last['HVWMA_A'] > last['HVWMA_B'] else "❄️ Bearish"
+        return round(float(last['HVWMA_A']), 2), ctype, int(bars_ago)
     return 0.0, "No Cross", 0
 
 
@@ -305,16 +374,9 @@ def get_crossover_details(df):
 def compute_signal(ltp, va, vb, rsi, vol, vol_ma, cross_val, cross_type,
                    P, R1, R2, S1, S2):
     """
-    INTRADAY (VWMA 9/26):
-      BUY  → RSI > 60  AND price > VWMA cross level  AND Vol > Vol MA(20)
-      SELL → RSI < 30  AND price < VWMA cross level  AND Vol > Vol MA(20)
-
-    MED-LONG TERM (VWMA 50/100):
-      BUY  → RSI > 60  AND price above VWMA cross    AND Vol(0) > Vol MA(20)
-      SELL → RSI < 30  AND price below VWMA cross    AND Vol(0) > Vol MA(20)
-
-    Target = Pivot R1 (or R2 if price already past R1)
-    SL     = Pivot S1 (or R1 for sells), enforced 1.5:1 R:R
+    BUY  → RSI > 60  AND price above HVWMA cross ref  AND Vol > Vol MA(20)
+    SELL → RSI < 30  AND price below HVWMA cross ref  AND Vol > Vol MA(20)
+    Target = Fib Pivot R1 (R2 if past R1). SL at 1.5:1 R:R, floored at S1.
     Suppressed if price is >50% into P→R1 (buy) or P→S1 (sell) zone.
     """
     signal, target, sl = "⚪ NEUTRAL", 0.0, 0.0
@@ -356,38 +418,26 @@ def compute_signal(ltp, va, vb, rsi, vol, vol_ma, cross_val, cross_type,
 
     return signal, target, sl
 
-# ─── METADATA LOADER ──────────────────────────────────────────────────────────
-# ─── METADATA LOADER (FIXED FALLBACK KEYS) ────────────────────────────────────
-def load_metadata():
-    import os
-    csv_path = "stock_fundamentals.csv"
-    
-    # Check if scraped file exists
-    if os.path.exists(csv_path):
-        try:
-            df = pd.read_csv(csv_path)
-            if not df.empty:
-                return df
-        except Exception as e:
-            st.error(f"⚠️ Error reading CSV: {e}")
 
-    # Fallback structure matching your exact dictionary key strings
-    fallback = [{
-        "Ticker": t, 
-        "Industry": d["Industry"], 
-        "Promoter_Percent": d["Promoter"],
-        "Stock_PE": d["PE"], 
-        "Industry_PE": d["Ind_PE"], 
-        "PB": d["PB"], 
-        "ROCE": d["ROCE"],
-        "Net Profit Margin (%) FY": d.get("NPM", 0),
-        "Op Profit Growth 3Y Avg (%)": d.get("OpProfGrowth3Y", 0),  # Matched exactly
-        "Sales Growth 3Y Avg (%)": d.get("SalesGrowth3Y", 0),      # Matched exactly
-        "ROE 3Y Avg (%)": d.get("ROE3Y", 0),
-        "ROCE 3Y Avg (%)": d.get("ROCE3Y", 0),
-        "Avg CFO 3Y (₹ Cr)": d.get("CFO3Y", 0)
-    } for t, d in NIFTY100.items()] 
-    return pd.DataFrame(fallback)
+# ─── METADATA ─────────────────────────────────────────────────────────────────
+def load_metadata():
+    return pd.DataFrame([{
+        "Ticker": t,
+        "Industry":        d["Industry"],
+        "Promoter_Percent":d["Promoter"],
+        "Stock_PE":        d["PE"],
+        "Industry_PE":     d["Ind_PE"],
+        "PB":              d["PB"],
+        "ROCE":            d["ROCE"],
+        "NPM":             d["NPM"],
+        "OpGr3Y":          d["OpGr3Y"],
+        "SalesGr3Y":       d["SalesGr3Y"],
+        "ROE3Y":           d["ROE3Y"],
+        "ROCE3Y":          d["ROCE3Y"],
+        "CFO3Y":           d["CFO3Y"],
+    } for t, d in NIFTY100.items()])
+
+
 # ─── SCANNER ──────────────────────────────────────────────────────────────────
 def execute_scan(meta_df, token_lookup, kite, mode):
     """
@@ -452,18 +502,22 @@ def execute_scan(meta_df, token_lookup, kite, mode):
                 if len(df_tf) < 5: continue
                 latest   = df_tf.iloc[-1]
                 ltp      = round(float(latest['close']), 2)
-                va       = float(latest['VWMA_A'])   if pd.notna(latest.get('VWMA_A')) else 0.0
-                vb       = float(latest['VWMA_B'])   if pd.notna(latest.get('VWMA_B')) else 0.0
-                rsi      = float(latest['RSI'])       if pd.notna(latest.get('RSI'))    else 50.0
-                rsi_s    = float(latest['RSI_SMOOTH'])if pd.notna(latest.get('RSI_SMOOTH')) else 50.0
+                va       = float(latest['HVWMA_A'])    if pd.notna(latest.get('HVWMA_A'))    else 0.0
+                vb       = float(latest['HVWMA_B'])    if pd.notna(latest.get('HVWMA_B'))    else 0.0
+                rsi      = float(latest['RSI'])         if pd.notna(latest.get('RSI'))        else 50.0
+                rsi_s    = float(latest['RSI_SMOOTH'])  if pd.notna(latest.get('RSI_SMOOTH')) else 50.0
+                rsi_div  = latest.get('RSI_DIV', '—')
                 vol      = float(latest['volume'])
-                vol_ma   = float(latest['VOL_MA'])    if pd.notna(latest.get('VOL_MA'))  else 0.0
-                macd     = float(latest['MACD'])      if pd.notna(latest.get('MACD'))    else 0.0
-                macd_sig = float(latest['MACD_SIGNAL'])if pd.notna(latest.get('MACD_SIGNAL')) else 0.0
-                bb_pct   = float(latest['BB_PCT'])    if pd.notna(latest.get('BB_PCT'))  else 0.5
-                adx      = float(latest['ADX'])       if pd.notna(latest.get('ADX'))     else 0.0
-                st_dir   = float(latest['ST_DIR'])    if pd.notna(latest.get('ST_DIR'))  else 0.0
-                ema200   = float(latest['EMA_200'])   if pd.notna(latest.get('EMA_200')) else 0.0
+                vol_ma   = float(latest['VOL_MA'])      if pd.notna(latest.get('VOL_MA'))     else 0.0
+                macd     = float(latest['MACD'])        if pd.notna(latest.get('MACD'))       else 0.0
+                macd_sig = float(latest['MACD_SIGNAL']) if pd.notna(latest.get('MACD_SIGNAL'))else 0.0
+                bb_pct   = float(latest['BB_PCT'])      if pd.notna(latest.get('BB_PCT'))     else 0.5
+                adx      = float(latest['ADX'])         if pd.notna(latest.get('ADX'))        else 0.0
+                st_dir   = float(latest['ST_DIR'])      if pd.notna(latest.get('ST_DIR'))     else 0.0
+                ema200   = float(latest['EMA_200'])     if pd.notna(latest.get('EMA_200'))    else 0.0
+                w52_pos  = float(latest['52W_POS'])     if pd.notna(latest.get('52W_POS'))    else float('nan')
+                w52_hi   = float(latest['52W_HIGH'])    if pd.notna(latest.get('52W_HIGH'))   else float('nan')
+                w52_lo   = float(latest['52W_LOW'])     if pd.notna(latest.get('52W_LOW'))    else float('nan')
 
                 cross_val, cross_type, bars_ago = get_crossover_details(df_tf)
                 P, R1, R2, S1, S2 = get_fibonacci_pivots(piv_src)
@@ -474,8 +528,8 @@ def execute_scan(meta_df, token_lookup, kite, mode):
                     P, R1, R2, S1, S2
                 )
 
-                vA_lbl = "VWMA 50" if is_ml else "VWMA 9"
-                vB_lbl = "VWMA 100" if is_ml else "VWMA 26"
+                vA_lbl = "HVWMA 50" if is_ml else "HVWMA 9"
+                vB_lbl = "HVWMA 100" if is_ml else "HVWMA 26"
 
                 stock_data.update({
                     f"Signal ({tf})":          sig,
@@ -483,12 +537,16 @@ def execute_scan(meta_df, token_lookup, kite, mode):
                     f"{vB_lbl} ({tf})":        round(vb, 2),
                     f"RSI ({tf})":             round(rsi, 2),
                     f"RSI Smooth ({tf})":      round(rsi_s, 2),
+                    f"RSI Divergence ({tf})":  rsi_div,
                     f"MACD ({tf})":            round(macd, 2),
                     f"MACD Signal ({tf})":     round(macd_sig, 2),
                     f"BB% ({tf})":             round(bb_pct, 3),
                     f"ADX ({tf})":             round(adx, 2),
                     f"Supertrend ({tf})":      "🟢 Bull" if st_dir == 1 else ("🔴 Bear" if st_dir == -1 else "—"),
                     f"EMA 200 ({tf})":         round(ema200, 2),
+                    f"52W Position% ({tf})":   f"{w52_pos:.1f}%" if not pd.isna(w52_pos) else "—",
+                    f"52W High ({tf})":        round(w52_hi, 2) if not pd.isna(w52_hi) else "—",
+                    f"52W Low ({tf})":         round(w52_lo, 2) if not pd.isna(w52_lo) else "—",
                     f"Vol > Vol MA ({tf})":    "✅" if vol > vol_ma else "❌",
                     f"Target ({tf})":          tgt,
                     f"StopLoss ({tf})":        sl,
@@ -546,10 +604,10 @@ def run():
                   text-transform:uppercase;margin-bottom:6px;">Signal Rules</div>
       <div style="font-family:'Space Grotesk',sans-serif;font-size:0.76rem;color:#00E5A0;margin-bottom:2px;">🟢 BUY</div>
       <div style="font-family:'Space Grotesk',sans-serif;font-size:0.72rem;color:#8A9ABB;margin-bottom:8px;">
-        RSI &gt; 60 · Price above VWMA cross<br>Vol &gt; Vol MA(20)</div>
+        RSI &gt; 60 · Price above HVWMA cross<br>Vol &gt; Vol MA(20)</div>
       <div style="font-family:'Space Grotesk',sans-serif;font-size:0.76rem;color:#FF4D6A;margin-bottom:2px;">🔴 SELL</div>
       <div style="font-family:'Space Grotesk',sans-serif;font-size:0.72rem;color:#8A9ABB;">
-        RSI &lt; 30 · Price below VWMA cross<br>Vol &gt; Vol MA(20)</div>
+        RSI &lt; 30 · Price below HVWMA cross<br>Vol &gt; Vol MA(20)</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -601,8 +659,8 @@ def run():
             else:
                 tf1 = "1D" if is_ml_tab else "15M"
                 tf2 = "1M" if is_ml_tab else "1D"
-                vA  = "VWMA 50" if is_ml_tab else "VWMA 9"
-                vB  = "VWMA 100" if is_ml_tab else "VWMA 26"
+                vA  = "HVWMA 50" if is_ml_tab else "HVWMA 9"
+                vB  = "HVWMA 100" if is_ml_tab else "HVWMA 26"
 
                 active_tf = st.radio("Timeframe", [tf1, tf2], horizontal=True,
                                      key=f"tf_{mode_key}")
@@ -622,9 +680,12 @@ def run():
                     "Stock", sig_col, "LTP",
                     f"{vA} ({active_tf})", f"{vB} ({active_tf})",
                     f"RSI ({active_tf})", f"RSI Smooth ({active_tf})",
+                    f"RSI Divergence ({active_tf})",
                     f"MACD ({active_tf})", f"MACD Signal ({active_tf})",
                     f"BB% ({active_tf})", f"ADX ({active_tf})",
                     f"Supertrend ({active_tf})", f"EMA 200 ({active_tf})",
+                    f"52W Position% ({active_tf})",
+                    f"52W High ({active_tf})", f"52W Low ({active_tf})",
                     f"Vol > Vol MA ({active_tf})",
                     f"Target ({active_tf})", f"StopLoss ({active_tf})",
                     f"Cross ({active_tf})", f"Pivots ({active_tf})",
@@ -654,63 +715,182 @@ def run():
                 st.dataframe(df[disp_cols].sort_values(by=sort_c, ascending=True),
                              use_container_width=True, hide_index=True)
 
-    # ── Fundamentals Tab ─────────────────────────────────────────────────────
+    # ── Fundamentals Tab — Live from Screener.in ─────────────────────────────
     with tab_fund:
         st.markdown(
             '<div style="font-family:\'Space Grotesk\',sans-serif;font-size:0.7rem;'
             'color:#4A5A78;letter-spacing:0.06em;text-transform:uppercase;'
-            'margin-bottom:0.8rem;">Valuation, Quality & Growth Filter</div>',
+            'margin-bottom:0.8rem;">Live Fundamentals · Screener.in</div>',
             unsafe_allow_html=True)
 
-        # Build fundamentals from static universe (no scan needed)
-        fund_df = load_metadata().rename(columns={
-            "Ticker":"Stock","Promoter_Percent":"Promoter (%)","Stock_PE":"PE",
-            "Industry_PE":"Industry PE","NPM":"Net Profit Margin (%) FY",
-            "OpGr3Y":"Op Profit Growth 3Y Avg (%)","SalesGr3Y":"Sales Growth 3Y Avg (%)",
-            "ROE3Y":"ROE 3Y Avg (%)","ROCE3Y":"ROCE 3Y Avg (%)",
-            "CFO3Y":"Avg CFO 3Y (₹ Cr)",
-        })
+        @st.cache_data(ttl=86400, show_spinner=False)
+        def fetch_screener(symbol: str) -> dict:
+            """Scrape key fundamentals from Screener.in for one symbol."""
+            headers = {"User-Agent": "Mozilla/5.0"}
+            url = f"https://www.screener.in/company/{symbol}/consolidated/"
+            try:
+                r = requests.get(url, headers=headers, timeout=10)
+                if r.status_code == 404:
+                    url = f"https://www.screener.in/company/{symbol}/"
+                    r   = requests.get(url, headers=headers, timeout=10)
+                if r.status_code != 200:
+                    return {}
+                soup = BeautifulSoup(r.text, "html.parser")
+
+                def rat(label):
+                    """Find ratio value by label text."""
+                    for li in soup.select("li.flex.flex-space-between"):
+                        name = li.select_one("span.name")
+                        val  = li.select_one("span.number, span.value")
+                        if name and val and label.lower() in name.get_text(strip=True).lower():
+                            txt = val.get_text(strip=True).replace(",","").replace("%","").replace("₹","")
+                            try: return float(txt)
+                            except: return None
+                    return None
+
+                # ── P&L table: last 3 years columns ──────────────────────────
+                def table_3y(table_id, row_label):
+                    """Return list of last 3 annual values from a Screener table row."""
+                    tbl = soup.find("section", {"id": table_id})
+                    if not tbl: return []
+                    for tr in tbl.select("tr"):
+                        th = tr.find("td") or tr.find("th")
+                        if th and row_label.lower() in th.get_text(strip=True).lower():
+                            tds = tr.find_all("td")[1:]   # skip label cell
+                            vals = []
+                            for td in tds[-3:]:            # last 3 years
+                                try: vals.append(float(td.get_text(strip=True).replace(",","").replace("%","")))
+                                except: pass
+                            return vals
+                    return []
+
+                def avg3(vals):
+                    clean = [v for v in vals if v is not None]
+                    return round(sum(clean)/len(clean), 2) if clean else None
+
+                npm_vals   = table_3y("profit-loss", "Net Profit")
+                sales_vals = table_3y("profit-loss", "Net Sales")
+                npm_pct    = None
+                if npm_vals and sales_vals and len(npm_vals)==len(sales_vals) and sales_vals[-1]:
+                    npm_pct = round(npm_vals[-1] / sales_vals[-1] * 100, 2)
+
+                op_vals    = table_3y("profit-loss", "Operating Profit")
+                op_gr      = []
+                for i in range(1, len(op_vals)):
+                    if op_vals[i-1] and op_vals[i-1] != 0:
+                        op_gr.append((op_vals[i]-op_vals[i-1])/abs(op_vals[i-1])*100)
+
+                sales_gr = []
+                for i in range(1, len(sales_vals)):
+                    if sales_vals[i-1] and sales_vals[i-1] != 0:
+                        sales_gr.append((sales_vals[i]-sales_vals[i-1])/abs(sales_vals[i-1])*100)
+
+                roe_vals  = table_3y("profit-loss", "Return on Equity")
+                roce_vals = table_3y("profit-loss", "Return on Capital Employed")
+                cfo_vals  = table_3y("cash-flow",   "Cash from Operations")
+
+                return {
+                    "PE":          rat("Stock P/E"),
+                    "PB":          rat("Price to Book"),
+                    "ROCE":        rat("Return on Capital Employed"),
+                    "ROE":         rat("Return on Equity"),
+                    "Debt/Equity": rat("Debt to equity"),
+                    "Div Yield":   rat("Dividend Yield"),
+                    "NPM (%) FY":  npm_pct,
+                    "Op Profit Gr 3Y Avg (%)":  avg3(op_gr),
+                    "Sales Gr 3Y Avg (%)":       avg3(sales_gr),
+                    "ROE 3Y Avg (%)":            avg3(roe_vals),
+                    "ROCE 3Y Avg (%)":           avg3(roce_vals),
+                    "Avg CFO 3Y (₹ Cr)":         avg3(cfo_vals),
+                }
+            except Exception:
+                return {}
+
+        tickers = list(NIFTY100.keys())
 
         f1, f2, f3 = st.columns(3)
         with f1:
-            sectors  = ["All"] + sorted(fund_df["Industry"].dropna().unique().tolist())
-            sel_sec  = st.selectbox("Sector", sectors)
+            industries = ["All"] + sorted(set(v["Industry"] for v in NIFTY100.values()))
+            sel_sec    = st.selectbox("Sector", industries, key="fund_sec")
         with f2:
-            sel_tier = st.selectbox("Promoter Tier",
-                                    ["All", "High (>50%)", "Medium (30-50%)", "Low (<30%)"])
+            sel_tier   = st.selectbox("Promoter Tier",
+                                      ["All","High (>50%)","Medium (30-50%)","Low (<30%)"],
+                                      key="fund_tier")
         with f3:
-            sel_roce = st.selectbox("ROCE 3Y Filter",
-                                    ["All", ">20%", ">15%", ">10%"])
+            sel_roce   = st.selectbox("ROCE 3Y Filter",
+                                      ["All",">20%",">15%",">10%"], key="fund_roce")
 
-        fdf = fund_df.copy()
-        if sel_sec != "All":
-            fdf = fdf[fdf["Industry"] == sel_sec]
-        if sel_tier != "All":
-            def tier(x):
-                x = float(x) if x else 0
-                return "High (>50%)" if x >= 50 else ("Medium (30-50%)" if x >= 30 else "Low (<30%)")
-            fdf = fdf[fdf["Promoter (%)"].apply(tier) == sel_tier]
-        if sel_roce != "All":
-            thres = {"All":0,">20%":20,">15%":15,">10%":10}[sel_roce]
-            fdf = fdf[pd.to_numeric(fdf["ROCE 3Y Avg (%)"], errors='coerce') >= thres]
+        fetch_btn = st.button("🔄  Fetch Live Fundamentals", key="btn_fund")
 
-        fund_display = [
-            "Stock","Industry","Promoter (%)","PE","Industry PE","PB","ROCE",
-            "Net Profit Margin (%) FY",
-            "Op Profit Growth 3Y Avg (%)",
-            "Sales Growth 3Y Avg (%)",
-            "ROE 3Y Avg (%)",
-            "ROCE 3Y Avg (%)",
-            "Avg CFO 3Y (₹ Cr)",
-        ]
-        fund_display = [c for c in fund_display if c in fdf.columns]
-        if not fdf.empty:
-            st.dataframe(
-                fdf[fund_display].sort_values(["Industry","Promoter (%)"],
-                                              ascending=[True, False]),
-                use_container_width=True, hide_index=True)
-        else:
-            st.info("No stocks match the selected filters.")
+        if "fund_data" not in st.session_state:
+            st.session_state["fund_data"] = None
+
+        if fetch_btn or st.session_state["fund_data"] is None:
+            prog = st.progress(0, text="Fetching fundamentals from Screener.in…")
+            rows = []
+            for idx, sym in enumerate(tickers):
+                d    = NIFTY100[sym]
+                live = fetch_screener(sym)
+                rows.append({
+                    "Stock":                    sym,
+                    "Industry":                 d["Industry"],
+                    "Promoter (%)":             d["Promoter"],
+                    "PE":                       live.get("PE")          or d["PE"],
+                    "Industry PE":              d["Ind_PE"],
+                    "PB":                       live.get("PB")          or d["PB"],
+                    "ROCE (%)":                 live.get("ROCE")        or d["ROCE"],
+                    "ROE (%)":                  live.get("ROE"),
+                    "Debt/Equity":              live.get("Debt/Equity"),
+                    "Div Yield (%)":            live.get("Div Yield"),
+                    "NPM (%) FY":               live.get("NPM (%) FY"),
+                    "Op Profit Gr 3Y Avg (%)":  live.get("Op Profit Gr 3Y Avg (%)"),
+                    "Sales Gr 3Y Avg (%)":      live.get("Sales Gr 3Y Avg (%)"),
+                    "ROE 3Y Avg (%)":           live.get("ROE 3Y Avg (%)"),
+                    "ROCE 3Y Avg (%)":          live.get("ROCE 3Y Avg (%)"),
+                    "Avg CFO 3Y (₹ Cr)":        live.get("Avg CFO 3Y (₹ Cr)"),
+                })
+                prog.progress((idx+1)/len(tickers),
+                              text=f"Fetching {sym} ({idx+1}/{len(tickers)})…")
+            st.session_state["fund_data"] = pd.DataFrame(rows)
+            prog.empty()
+
+        fdf = st.session_state["fund_data"]
+        if fdf is not None:
+            view = fdf.copy()
+            if sel_sec != "All":
+                view = view[view["Industry"] == sel_sec]
+            if sel_tier != "All":
+                def tier(x):
+                    x = float(x) if x else 0
+                    return "High (>50%)" if x>=50 else ("Medium (30-50%)" if x>=30 else "Low (<30%)")
+                view = view[view["Promoter (%)"].apply(tier) == sel_tier]
+            if sel_roce != "All":
+                thresh = {">20%":20,">15%":15,">10%":10}[sel_roce]
+                view   = view[pd.to_numeric(view["ROCE 3Y Avg (%)"], errors='coerce') >= thresh]
+
+            fund_display = [
+                "Stock","Industry","Promoter (%)","PE","Industry PE","PB",
+                "ROCE (%)","ROE (%)","Debt/Equity","Div Yield (%)",
+                "NPM (%) FY",
+                "Op Profit Gr 3Y Avg (%)",
+                "Sales Gr 3Y Avg (%)",
+                "ROE 3Y Avg (%)",
+                "ROCE 3Y Avg (%)",
+                "Avg CFO 3Y (₹ Cr)",
+            ]
+            fund_display = [c for c in fund_display if c in view.columns]
+            st.markdown(
+                f'<div style="font-family:\'Space Grotesk\',sans-serif;font-size:0.7rem;'
+                f'color:#4A5A78;margin-bottom:4px;">'
+                f'Showing {len(view)} stocks · Data from Screener.in (cached 24h)</div>',
+                unsafe_allow_html=True)
+            if not view.empty:
+                st.dataframe(
+                    view[fund_display].sort_values(
+                        ["Industry","Promoter (%)"], ascending=[True,False]),
+                    use_container_width=True, hide_index=True)
+            else:
+                st.info("No stocks match the selected filters.")
 
 if __name__ == "__main__":
     run()
